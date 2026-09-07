@@ -97,6 +97,35 @@ g_{\mathrm{tgt}}^{\mathrm{AM}}
 }
 ```
 
+上式是 `alpha_AF=1` 时的 AM reward 分支。完整版本还把 Note/AlphaFlow 的
+frozen pre actor 与 EMA target actor 移植到 MeanFlowQL direct map：
+
+```math
+s_\alpha=\alpha_{\mathrm{AF}}t,
+\qquad
+u_{\mathrm{boot}}=x_t-g_{\bar\theta}(o,x_t,t),
+```
+
+```math
+x_s=x_t-(t-s_\alpha)u_{\mathrm{boot}},
+\qquad
+u_{\mathrm{reward}}^{\mathrm{AM}}
+=x_s-g_{\mathrm{reward}}^{\mathrm{AM}},
+```
+
+```math
+\boxed{
+u_\alpha
+=\alpha_{\mathrm{AF}}u_{\mathrm{reward}}^{\mathrm{AM}}
++(1-\alpha_{\mathrm{AF}})u_{\mathrm{boot}},
+\qquad
+g_\alpha=x_t-u_\alpha
+}
+```
+
+`alpha_AF=1` 是纯 AM changed target；固定 `alpha_AF=0` 使用独立的 EMA JVP
+consistency 极限分支。
+
 完整推导和运行说明见 `AM_MF_CHANGED_TARGET.md`。
 
 ## 3. 两个版本的结构差异
@@ -109,10 +138,10 @@ g_{\mathrm{tgt}}^{\mathrm{AM}}
 | 一步动作 | `epsilon-u(o,epsilon,0,1)` | `g(o,epsilon,1)` |
 | AM Q 注入 | Note reward velocity target | MeanFlowQL path velocity与 `g_tgt` |
 | JVP | Native/endpoint JVP | MeanFlowQL reformulated JVP |
-| target actor | EMA target actor | 不新增；使用 frozen current snapshot 构造 endpoint |
-| pre actor | 冻结 | 不需要 |
+| target actor | EMA target actor | EMA direct-map snapshot，保存在 agent state |
+| pre actor | 冻结 | 冻结的 behavior direct-map snapshot |
 | checkpoint 来源 | Native MeanFlow | MeanFlowQL |
-| alpha 语义 | AlphaFlow mixture | MeanFlowQL MFI/BC coefficient |
+| alpha 语义 | AlphaFlow mixture | `alpha` 为 MFI/BC 权重；`alphaflow_alpha_*` 为 target mixture |
 
 两个版本不共享 actor checkpoint；即使 action dimension 相同，输入签名和输出语义
 也不相同。
@@ -126,7 +155,8 @@ g_{\mathrm{tgt}}^{\mathrm{AM}}
 - 一步动作仍通过 `epsilon-u` 生成，而不是直接调用 `g(epsilon,1)`。
 
 当前第二版直接继承 `MeanFlowQL_Agent`，并保留其网络参数树、采样接口、adaptive
-MFI loss、critic 和动态 BC 系数。
+MFI loss、critic 和动态 BC 系数。额外的 frozen pre 与 EMA target snapshot 放在
+agent state 外层，不改变 optimizer 参数树。
 
 ## 5. 阶段边界
 
@@ -137,7 +167,9 @@ pretrain(): 原 MeanFlowQL target，use_am=False
 update():   AM-guided MeanFlowQL target，use_am=True
 ```
 
-这样 critic guidance 不会在 behavior pretrain 时提前进入。若
+每次 pretrain 后，online actor 会硬同步到 frozen pre 与 EMA target；正式 update
+期间只更新 online actor 和 EMA target，pre actor 保持冻结。这样 critic guidance
+不会在 behavior pretrain 时提前进入。若
 `pretrain_factor=0`，则从第一步 update 开始使用 AM target；这应被标记为
 no-pretrain ablation。
 
@@ -194,7 +226,7 @@ python -m pytest -q \
 | --- | --- |
 | `test_am_meanflow.py` | 原 AM/Note 数学工具、AlphaFlow 和 endpoint JVP |
 | `test_am_meanflow_agent.py` | 原 target agent、freeze、EMA、checkpoint |
-| `test_am_meanflow_target_changed.py` | MeanFlowQL endpoint、AM-guided `g_tgt`、eta=0 等价、更新和迁移 |
+| `test_am_meanflow_target_changed.py` | MeanFlowQL endpoint、AM-guided `g_tgt`、AlphaFlow 边界、freeze/EMA、eta=0 等价和迁移 |
 
 ## 9. 最小实验矩阵
 
@@ -203,8 +235,8 @@ python -m pytest -q \
 | Native | `agents/native_meanflow.py` | Native MeanFlow 基线 |
 | AM-Original | `agents/am_meanflow.py` | AM target 保持不变 |
 | MeanFlowQL | `agents/meanflowql.py` | 官方 reformulated target 基线 |
-| AM-MQL-0 | `agents/am_meanflow_target_changed.py`, `eta=0` | MeanFlowQL target 等价控制 |
-| AM-MQL | `agents/am_meanflow_target_changed.py`, `eta>0` | AM 融入 MeanFlowQL target |
+| AM-MQL-0 | `agents/am_meanflow_target_changed.py`, `alpha_AF=1`, `eta=0` | MeanFlowQL target 等价控制 |
+| AM-MQL | `agents/am_meanflow_target_changed.py`, AlphaFlow anneal, `eta>0` | AM 与 EMA consistency 融入 MeanFlowQL target |
 
 所有对照应记录各自 checkpoint schema。AM-Original 与 AM-MQL 是两种不同 actor
 参数化上的算法比较，不应声称只改变一个标量超参数。

@@ -340,9 +340,21 @@ class ConsistencyAgentAdapterTest(unittest.TestCase):
             jacobian_probe_pairs=1,
             rng=jax.random.PRNGKey(10),
         )
+        target_metrics = evaluate_agent_consistency(
+            agent,
+            observations,
+            jnp.ones_like(actions),
+            nfe_values=(1, 2),
+            trajectory_steps=2,
+            jacobian_probe_pairs=1,
+            use_target_actor=True,
+            rng=jax.random.PRNGKey(10),
+        )
 
         self.assertEqual(metrics["agent_name"], "am_meanflow_target_changed")
         self.assertEqual(metrics["family"], "meanflowql")
+        self.assertEqual(metrics["use_target_actor"], 0)
+        self.assertEqual(target_metrics["use_target_actor"], 1)
         self.assertNotIn("split_consistency_mse", metrics)
         for key in (
             "k1_k2_mse",
@@ -350,6 +362,7 @@ class ConsistencyAgentAdapterTest(unittest.TestCase):
             "endpoint_jvp_mse",
         ):
             self.assertTrue(np.isfinite(float(metrics[key])))
+            self.assertTrue(np.isfinite(float(target_metrics[key])))
 
 
 if __name__ == "__main__":

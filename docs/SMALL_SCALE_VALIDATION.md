@@ -95,7 +95,7 @@ bash scripts/small_scale_validation/run_humanoidmaze_large_task1.sh offline 1
 | MeanFlowQL + consistency | `agents/meanflowql.py` | `--agent.consistency_alpha`（大于 `0` 开启）以及上述 baseline 参数 |
 | 原生 Native MeanFlow | `agents/native_meanflow.py` | `--agent.meanflow_coef`、`--agent.q_coef`、`--agent.critic_coef`、`--agent.bound_loss_weight`、`--agent.num_candidates` |
 | 原始 AM-MF target | `agents/am_meanflow.py` | `--agent.adjoint_eta`、`--agent.am_loss_coef`、`--agent.native_regularizer_coef`、`--agent.alpha_mode`、`--agent.alpha_value`、`--agent.alpha_floor` |
-| AM 作用于 MeanFlowQL target | `agents/am_meanflow_target_changed.py` | `--agent.adjoint_eta`、`--agent.meanflowql_direct_q_coef`、`--agent.alpha`、`--agent.num_candidates`、`--agent.time_steps` |
+| AM + AlphaFlow 作用于 MeanFlowQL target | `agents/am_meanflow_target_changed.py` | `--agent.adjoint_eta`、`--agent.alphaflow_alpha_mode`、`--agent.alphaflow_alpha_value`、`--agent.alphaflow_alpha_floor`、`--agent.alphaflow_target_tau`、`--agent.meanflowql_direct_q_coef`、`--agent.alpha`、`--agent.num_candidates`、`--agent.time_steps` |
 
 例如，启动“AM 作用于 MeanFlowQL target”的 Humanoid offline 筛选：
 
@@ -107,6 +107,20 @@ bash scripts/small_scale_validation/run_humanoidmaze_large_task1.sh offline 1
 
 其中 `meanflowql_direct_q_coef=0.0` 表示 Q 只通过 AM target 进入 actor；设为大于零时，
 会形成“AM target + 原始 MeanFlowQL Direct-Q”的混合消融，必须在结果中明确标注。
+
+这里有两个不同的 alpha：`--agent.alpha` 是 MeanFlowQL 原有的 MFI/BC loss
+权重；`--agent.alphaflow_alpha_*` 控制 AM reward target 与 EMA consistency
+bootstrap 的 mixture。严格复现无 AlphaFlow 的 MeanFlowQL target 时，使用：
+
+```bash
+AGENT_PATH=agents/am_meanflow_target_changed.py \
+EXTRA_AGENT_FLAGS='--agent.alphaflow_alpha_mode=fixed --agent.alphaflow_alpha_value=1.0 --agent.adjoint_eta=0.0 --agent.meanflowql_direct_q_coef=0.0' \
+bash scripts/small_scale_validation/run_humanoidmaze_large_task1.sh offline 1
+```
+
+精确测试 AlphaFlow 的零点 JVP consistency 分支时，使用
+`--agent.alphaflow_alpha_mode=fixed --agent.alphaflow_alpha_value=0.0`；普通训练应使用
+默认 anneal 模式和正数 `alphaflow_alpha_floor`。
 
 脚本会识别四个已实现 agent：`meanflowql.py`、`native_meanflow.py`、
 `am_meanflow.py`、`am_meanflow_target_changed.py`。只有 MeanFlowQL 与

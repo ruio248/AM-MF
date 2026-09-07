@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1500" height="900" viewBox="0 0 1500 900" role="img" aria-labelledby="title desc">
   <title id="title">AM-MF algorithm pipeline</title>
-  <desc id="desc">MeanFlowQL training pipeline showing endpoint adjoint guidance inside the target, endpoint consistency regularization, and optional direct-Q optimization.</desc>
+  <desc id="desc">MeanFlowQL training pipeline showing endpoint adjoint guidance inside a complete AlphaFlow reward and EMA consistency target mixture.</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#f8fbff"/>
@@ -42,11 +42,11 @@
   <rect x="0" y="0" width="1500" height="105" rx="24" fill="url(#header)"/>
   <rect x="0" y="82" width="1500" height="23" fill="url(#header)"/>
   <text x="54" y="52" class="title">AM-MF: Adjoint- and Consistency-Guided MeanFlowQL</text>
-  <text x="55" y="82" class="subtitle">Adjoint changes the MeanFlowQL regression target · Consistency regularizes the implied endpoint map</text>
+  <text x="55" y="82" class="subtitle">Adjoint builds the reward target · AlphaFlow mixes it with an EMA consistency bootstrap</text>
 
   <text x="55" y="148" class="section" fill="#3467a4">1 · MEANFLOWQL BASELINE</text>
   <text x="520" y="148" class="section" fill="#7b4ab0">2 · ADJOINT TARGET GUIDANCE</text>
-  <text x="1010" y="148" class="section" fill="#2f8f72">3 · CONSISTENCY REGULARIZATION</text>
+  <text x="1010" y="148" class="section" fill="#2f8f72">3 · ALPHAFLOW CONSISTENCY</text>
 
   <!-- Base path -->
   <g filter="url(#shadow)">
@@ -100,10 +100,10 @@
     <rect x="520" y="511" width="420" height="124" rx="16" fill="#fbf8ff" stroke="#c6addf" stroke-width="2"/>
     <rect x="520" y="511" width="8" height="124" rx="4" fill="#7b4ab0"/>
   </g>
-  <text x="548" y="544" class="box-title">AM-guided MeanFlowQL target</text>
-  <text x="548" y="574" class="formula">D<tspan baseline-shift="sub" font-size="12">t</tspan><tspan baseline-shift="super" font-size="12">[vAM]</tspan> gθ  (JVP)</text>
-  <text x="548" y="603" class="formula">g<tspan baseline-shift="sub" font-size="12">tgt</tspan><tspan baseline-shift="super" font-size="12">AM</tspan> = xₜ + (t−1)v<tspan baseline-shift="sub" font-size="12">AM</tspan> − tD<tspan baseline-shift="sub" font-size="12">t</tspan><tspan baseline-shift="super" font-size="12">[vAM]</tspan>gθ</text>
-  <text x="548" y="625" class="small">η = 0 exactly recovers the original MeanFlowQL target</text>
+  <text x="548" y="544" class="box-title">Frozen-pre AM reward target</text>
+  <text x="548" y="574" class="formula">D<tspan baseline-shift="sub" font-size="12">t</tspan><tspan baseline-shift="super" font-size="12">[vAM]</tspan> g<tspan baseline-shift="sub" font-size="12">pre</tspan>  (JVP at x<tspan baseline-shift="sub" font-size="12">s</tspan>, sα)</text>
+  <text x="548" y="603" class="formula">g<tspan baseline-shift="sub" font-size="12">reward</tspan><tspan baseline-shift="super" font-size="12">AM</tspan> = x<tspan baseline-shift="sub" font-size="12">s</tspan> + (sα−1)v<tspan baseline-shift="sub" font-size="12">AM</tspan> − sαD<tspan baseline-shift="sub" font-size="12">t</tspan><tspan baseline-shift="super" font-size="12">[vAM]</tspan>g<tspan baseline-shift="sub" font-size="12">pre</tspan></text>
+  <text x="548" y="625" class="small">At α = 1 and η = 0, this is the original MeanFlowQL target</text>
 
   <path d="M400 574 C455 574 465 234 520 234" stroke="#7b4ab0" stroke-width="3" fill="none" marker-end="url(#arrowPurple)"/>
   <text x="424" y="389" class="arrow-label" fill="#7b4ab0">F_g</text>
@@ -112,32 +112,32 @@
   <path d="M400 399 C462 399 470 399 520 399" stroke="#3467a4" stroke-width="2.5" fill="none" marker-end="url(#arrowBlue)"/>
   <text x="462" y="389" class="arrow-label" fill="#3467a4">v</text>
 
-  <!-- Consistency path -->
+  <!-- AlphaFlow consistency path -->
   <g filter="url(#shadow)">
     <rect x="1010" y="178" width="435" height="135" rx="16" fill="#f5fcf9" stroke="#9fd4c3" stroke-width="2"/>
     <rect x="1010" y="178" width="8" height="135" rx="4" fill="#2f8f72"/>
   </g>
-  <text x="1038" y="211" class="box-title">Shared sample at two times</text>
-  <text x="1038" y="240" class="formula">x<tspan baseline-shift="sub" font-size="12">t₁</tspan> = (1−t₁)a + t₁ε</text>
-  <text x="1038" y="268" class="formula">x<tspan baseline-shift="sub" font-size="12">t₂</tspan> = (1−t₂)a + t₂ε</text>
-  <text x="1038" y="294" class="small">Same observation, action and Gaussian noise</text>
+  <text x="1038" y="211" class="box-title">EMA bootstrap and split time</text>
+  <text x="1038" y="240" class="formula">sα = αt,   u<tspan baseline-shift="sub" font-size="12">boot</tspan> = xₜ − ḡθ(o,xₜ,t)</text>
+  <text x="1038" y="268" class="formula">x<tspan baseline-shift="sub" font-size="12">s</tspan> = xₜ − (t−sα)u<tspan baseline-shift="sub" font-size="12">boot</tspan></text>
+  <text x="1038" y="294" class="small">ḡθ is the EMA actor; g_pre remains frozen</text>
 
   <g filter="url(#shadow)">
     <rect x="1010" y="360" width="435" height="124" rx="16" fill="#f5fcf9" stroke="#9fd4c3" stroke-width="2"/>
     <rect x="1010" y="360" width="8" height="124" rx="4" fill="#2f8f72"/>
   </g>
-  <text x="1038" y="393" class="box-title">Endpoint agreement</text>
-  <text x="1038" y="423" class="formula">F<tspan baseline-shift="sub" font-size="12">g</tspan>(t₁) = (1−t₁)x<tspan baseline-shift="sub" font-size="12">t₁</tspan> + t₁gθ(o,x<tspan baseline-shift="sub" font-size="12">t₁</tspan>,t₁)</text>
-  <text x="1038" y="453" class="formula">F̄<tspan baseline-shift="sub" font-size="12">g</tspan>(t₂) = stopgrad(endpoint at t₂)</text>
-  <text x="1038" y="476" class="small">Only the t₁ branch receives this regularizer gradient</text>
+  <text x="1038" y="393" class="box-title">Velocity-space AlphaFlow mixture</text>
+  <text x="1038" y="423" class="formula">u<tspan baseline-shift="sub" font-size="12">AM</tspan> = x<tspan baseline-shift="sub" font-size="12">s</tspan> − g<tspan baseline-shift="sub" font-size="12">reward</tspan><tspan baseline-shift="super" font-size="12">AM</tspan></text>
+  <text x="1038" y="453" class="formula">uα = αu<tspan baseline-shift="sub" font-size="12">AM</tspan> + (1−α)u<tspan baseline-shift="sub" font-size="12">boot</tspan></text>
+  <text x="1038" y="476" class="small">α: reward/AM at 1 → EMA consistency near 0</text>
 
   <g filter="url(#shadow)">
     <rect x="1010" y="531" width="435" height="104" rx="16" fill="#f5fcf9" stroke="#9fd4c3" stroke-width="2"/>
     <rect x="1010" y="531" width="8" height="104" rx="4" fill="#2f8f72"/>
   </g>
-  <text x="1038" y="564" class="box-title">Consistency loss</text>
-  <text x="1038" y="595" class="formula">ℒ<tspan baseline-shift="sub" font-size="12">cons</tspan> = 𝔼 ‖F<tspan baseline-shift="sub" font-size="12">g</tspan>(t₁) − F̄<tspan baseline-shift="sub" font-size="12">g</tspan>(t₂)‖²<tspan baseline-shift="sub" font-size="12">2</tspan></text>
-  <text x="1038" y="620" class="small">β_cons = --agent.consistency_alpha</text>
+  <text x="1038" y="564" class="box-title">Unified direct-map target</text>
+  <text x="1038" y="595" class="formula">gα = xₜ − uα,   ℒα = AdaptiveL2(gθ − sg(gα)) / α</text>
+  <text x="1038" y="620" class="small">Fixed α = 0 uses the exact EMA-JVP limit branch</text>
 
   <path d="M1227 313 L1227 360" stroke="#2f8f72" stroke-width="3" fill="none" marker-end="url(#arrowGreen)"/>
   <path d="M1227 484 L1227 531" stroke="#2f8f72" stroke-width="3" fill="none" marker-end="url(#arrowGreen)"/>
@@ -149,16 +149,16 @@
   <rect x="274" y="731" width="104" height="27" rx="13" fill="#7b4ab0"/>
   <text x="291" y="750" class="chip">TARGET</text>
   <rect x="390" y="731" width="137" height="27" rx="13" fill="#2f8f72"/>
-  <text x="407" y="750" class="chip">REGULARIZER</text>
+  <text x="407" y="750" class="chip">EMA MIXTURE</text>
   <rect x="539" y="731" width="116" height="27" rx="13" fill="#d66b2c"/>
   <text x="556" y="750" class="chip">OPTIONAL</text>
-  <text x="274" y="791" class="formula">ℒ<tspan baseline-shift="sub" font-size="12">actor</tspan> = ℒ<tspan baseline-shift="sub" font-size="12">MFI</tspan>(gθ, stopgrad(g<tspan baseline-shift="sub" font-size="12">tgt</tspan><tspan baseline-shift="super" font-size="12">AM</tspan>)) + β<tspan baseline-shift="sub" font-size="12">cons</tspan>ℒ<tspan baseline-shift="sub" font-size="12">cons</tspan> + β<tspan baseline-shift="sub" font-size="12">Q</tspan>ℒ<tspan baseline-shift="sub" font-size="12">direct-Q</tspan> + ℒ<tspan baseline-shift="sub" font-size="12">bound</tspan></text>
-  <text x="274" y="815" class="small">Default changed-target AM-MF: β_Q = --agent.meanflowql_direct_q_coef = 0; C5 inference samples 5 actions and selects argmax Q</text>
+  <text x="274" y="791" class="formula">ℒ<tspan baseline-shift="sub" font-size="12">actor</tspan> = ℒ<tspan baseline-shift="sub" font-size="12">AlphaFlow-MFI</tspan>(gθ, stopgrad(gα)) + β<tspan baseline-shift="sub" font-size="12">Q</tspan>ℒ<tspan baseline-shift="sub" font-size="12">direct-Q</tspan> + ℒ<tspan baseline-shift="sub" font-size="12">bound</tspan></text>
+  <text x="274" y="815" class="small">Default: EMA AlphaFlow consistency is on; legacy pairwise MSE and Direct-Q are off; C5 selects the best of 5 actions with Q</text>
 
   <path d="M730 635 C730 674 680 686 650 710" stroke="#7b4ab0" stroke-width="3" fill="none" marker-end="url(#arrowPurple)"/>
   <path d="M1227 635 C1227 679 1100 694 1035 710" stroke="#2f8f72" stroke-width="3" fill="none" marker-end="url(#arrowGreen)"/>
   <path d="M400 616 C440 659 480 680 515 710" stroke="#d66b2c" stroke-width="2.5" stroke-dasharray="8 7" fill="none" marker-end="url(#arrowOrange)"/>
   <text x="411" y="668" class="arrow-label" fill="#d66b2c">optional direct-Q</text>
 
-  <text x="55" y="872" class="small">Solid purple: adjoint modifies the regression target · Solid green: endpoint consistency loss · Dashed orange: optional hybrid Direct-Q branch</text>
+  <text x="55" y="872" class="small">Solid purple: adjoint forms the reward target · Solid green: EMA AlphaFlow target mixture · Dashed orange: optional hybrid Direct-Q branch</text>
 </svg>

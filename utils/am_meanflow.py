@@ -175,6 +175,57 @@ def meanflowql_reformulated_target(
     )
 
 
+def meanflowql_alphaflow_state(
+    state: Array,
+    current_time: Array,
+    alpha: Array,
+    bootstrap_direct_map: Array,
+) -> Tuple[Array, Array, Array]:
+    """Split a MeanFlowQL reverse path with the AlphaFlow coefficient.
+
+    MeanFlowQL uses action-to-noise time, the reverse of the convention used
+    by the original AlphaFlow note.  Therefore the note's intermediate time
+    becomes ``s_alpha = alpha * t`` when the target time is zero.  The EMA
+    direct map supplies the average velocity for the bootstrap segment from
+    ``t`` to ``s_alpha``.
+
+    Returns ``(s_alpha, x_s, u_boot)`` where ``u_boot = x_t - g_bar`` and
+    ``x_s = x_t - (t - s_alpha) * u_boot``.
+    """
+
+    alpha = jnp.asarray(alpha, dtype=state.dtype)
+    intermediate_time = alpha * current_time
+    bootstrap_velocity = state - bootstrap_direct_map
+    intermediate_state = state - (
+        current_time - intermediate_time
+    ) * bootstrap_velocity
+    return intermediate_time, intermediate_state, bootstrap_velocity
+
+
+def meanflowql_alphaflow_target(
+    state: Array,
+    intermediate_state: Array,
+    reward_direct_target: Array,
+    bootstrap_direct_map: Array,
+    alpha: Array,
+) -> Tuple[Array, Array, Array]:
+    """Mix changed-target AM and EMA consistency in velocity space.
+
+    ``g = x - u`` converts a MeanFlowQL direct-map target to the average
+    velocity used by the original AlphaFlow note.  This helper applies the
+    note's ``alpha * u_reward + (1-alpha) * u_boot`` mixture and maps the
+    result back to a direct-map target at ``state``.
+    """
+
+    alpha = jnp.asarray(alpha, dtype=state.dtype)
+    reward_velocity = intermediate_state - reward_direct_target
+    bootstrap_velocity = state - bootstrap_direct_map
+    mixed_velocity = compose_am_target(
+        reward_velocity, bootstrap_velocity, alpha
+    )
+    return state - mixed_velocity, reward_velocity, bootstrap_velocity
+
+
 def meanflow_endpoint_jvp_target(
     local_velocity: Array,
     start_time: Array,

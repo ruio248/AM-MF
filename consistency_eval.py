@@ -58,7 +58,8 @@ flags.DEFINE_integer(
 flags.DEFINE_bool(
     "use_target_actor",
     False,
-    "Use the EMA target actor for native MeanFlow agents.",
+    "Use the EMA target actor for Native MeanFlow-family or "
+    "changed-target AM-MF.",
 )
 flags.DEFINE_string(
     "probe_path",

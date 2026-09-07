@@ -216,6 +216,11 @@ MUJOCO_GL=egl python consistency_eval.py \
 - `offline_steps`、`online_steps` 和 `pretrain_factor`；
 - 训练 seed。
 
+默认评估 online actor。Native MeanFlow family（`native_meanflow`、`am_meanflow`）
+与完整 AlphaFlow 版 `am_meanflow_target_changed` 也可以传入
+`--use_target_actor`，改为评估各自的 EMA actor。原始 `meanflowql` 和
+`meanflowql_beta` 没有 EMA actor，对它们使用该参数会明确报错。
+
 默认输出：
 
 ```text
@@ -341,3 +346,4 @@ python -m pytest -q tests/test_consistency_eval.py
 - 非法 shape、NFE 和 split triplet 拒绝；
 - 显式阈值的 pass/fail 判别；
 - Native AM-MF 与 MeanFlowQL target-changed adapter 分流。
+- changed-target AM-MF 的 online/EMA actor 都能生成有限的一致性指标。

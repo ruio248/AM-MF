@@ -764,25 +764,40 @@ def evaluate_agent_consistency(
         "meanflowql_beta",
         "am_meanflow_target_changed",
     }:
-        if use_target_actor:
+        if use_target_actor and agent_name != "am_meanflow_target_changed":
             raise ValueError(
-                "use_target_actor is only available for Native MeanFlow "
-                "agents; MeanFlowQL has no EMA target actor."
+                f"Agent {agent_name!r} has no EMA target actor; "
+                "use_target_actor is available for Native MeanFlow-family "
+                "agents and am_meanflow_target_changed."
             )
-        actor = agent.network.select("actor_bc_flow")
-        encoder = (
-            agent.network.select("actor_bc_flow_encoder")
-            if agent.config.get("encoder") is not None
-            else None
-        )
-
-        def direct_map_fn(obs, state, time):
-            if encoder is not None:
-                encoded_obs = encoder(obs)
-                return actor(
-                    encoded_obs, state, time, is_encoded=True
+        if use_target_actor:
+            target_actor_params = getattr(agent, "target_actor_params", None)
+            call_actor_snapshot = getattr(agent, "_call_actor_snapshot", None)
+            if target_actor_params is None or call_actor_snapshot is None:
+                raise ValueError(
+                    "am_meanflow_target_changed exposes no EMA target actor "
+                    "snapshot for consistency evaluation."
                 )
-            return actor(obs, state, time)
+
+            def direct_map_fn(obs, state, time):
+                return call_actor_snapshot(
+                    target_actor_params, obs, state, time
+                )
+        else:
+            actor = agent.network.select("actor_bc_flow")
+            encoder = (
+                agent.network.select("actor_bc_flow_encoder")
+                if agent.config.get("encoder") is not None
+                else None
+            )
+
+            def direct_map_fn(obs, state, time):
+                if encoder is not None:
+                    encoded_obs = encoder(obs)
+                    return actor(
+                        encoded_obs, state, time, is_encoded=True
+                    )
+                return actor(obs, state, time)
 
         metrics = evaluate_meanflowql_consistency(
             direct_map_fn,

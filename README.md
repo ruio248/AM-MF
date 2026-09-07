@@ -47,41 +47,51 @@ $$
 v_{\mathrm{AM}}=v-\eta t\lambda_t.
 $$
 
-Here $\eta$ is controlled by `--agent.adjoint_eta`. The guided velocity
-$v_{\mathrm{AM}}$ replaces the original conditional velocity in both the MeanFlowQL
-target and its JVP:
+Here $\eta$ is controlled by `--agent.adjoint_eta`. The complete changed-target
+agent has a frozen pre actor and an EMA target actor. In MeanFlowQL's
+action-to-noise convention, AlphaFlow first uses the EMA direct map to split
+the path:
 
 $$
-g_{\mathrm{tgt}}^{\mathrm{AM}}
-=x_t+(t-1)v_{\mathrm{AM}}
--tD_t^{[v_{\mathrm{AM}}]}g_\theta.
-$$
-
-`--agent.adjoint_eta=0` therefore recovers the original MeanFlowQL target.
-The consistency branch uses the same observation, data action, and Gaussian
-noise at two sampled times. It penalizes disagreement between their implied
-endpoints:
-
-$$
-\mathcal L_{\mathrm{cons}}
-=\mathbb E\!\left[
-\left\|F_g(t_1)-\operatorname{sg}\!\left(F_g(t_2)\right)\right\|_2^2
-\right],
-$$
-
-$$
-\mathcal L_{\mathrm{flow}}
-=\mathcal L_{\mathrm{MFI}}
-+\beta_{\mathrm{cons}}\mathcal L_{\mathrm{cons}},
+s_\alpha=\alpha_{\mathrm{AF}}t,
 \qquad
-\beta_{\mathrm{cons}}=\texttt{consistency\_alpha}.
+u_{\mathrm{boot}}=x_t-g_{\bar\theta}(o,x_t,t),
+\qquad
+x_s=x_t-(t-s_\alpha)u_{\mathrm{boot}}.
 $$
 
-Use `--agent.consistency_alpha=0` to disable consistency. In
-`agents/am_meanflow_target_changed.py`, Q enters through the adjoint target by
-default; `--agent.meanflowql_direct_q_coef=0` disables the additional direct-Q
-actor gradient, while a positive value deliberately creates a hybrid
-ablation. Full derivations are in
+At $(x_s,s_\alpha)$, the frozen pre actor supplies the JVP along
+$v_{\mathrm{AM}}$ and produces the AM reward target:
+
+$$
+g_{\mathrm{reward}}^{\mathrm{AM}}
+=x_s+(s_\alpha-1)v_{\mathrm{AM}}
+-s_\alpha D_t^{[v_{\mathrm{AM}}]}g_{\mathrm{pre}}.
+$$
+
+The Note/AlphaFlow consistency mechanism then mixes this reward velocity with
+the EMA bootstrap velocity and maps it back to MeanFlowQL's direct-map target:
+
+$$
+u_{\mathrm{reward}}^{\mathrm{AM}}=x_s-g_{\mathrm{reward}}^{\mathrm{AM}},
+\qquad
+u_\alpha=\alpha_{\mathrm{AF}}u_{\mathrm{reward}}^{\mathrm{AM}}
++(1-\alpha_{\mathrm{AF}})u_{\mathrm{boot}},
+\qquad
+g_\alpha=x_t-u_\alpha.
+$$
+
+`alpha_AF=1` selects the pure AM changed target; fixed `alpha_AF=0` activates
+the exact EMA-JVP consistency limit. The inherited `--agent.alpha` remains
+MeanFlowQL's outer MFI/BC loss weight, while the separate
+`--agent.alphaflow_alpha_*` parameters control target mixing. The older
+pairwise endpoint MSE is only an optional extra ablation through
+`--agent.consistency_alpha>0` and is disabled by default.
+
+Q enters through the adjoint target by default;
+`--agent.meanflowql_direct_q_coef=0` disables the additional direct-Q actor
+gradient, while a positive value deliberately creates a hybrid ablation. Full
+derivations are in
 [docs/AM_MF_INTRODUCTION.md](docs/AM_MF_INTRODUCTION.md) and
 [docs/AM_MF_CHANGED_TARGET.md](docs/AM_MF_CHANGED_TARGET.md).
 
@@ -117,7 +127,7 @@ the agent path and its existing config names:
 ```bash
 # AM embedded in the MeanFlowQL target; no extra direct-Q actor gradient.
 AGENT_PATH=agents/am_meanflow_target_changed.py \
-EXTRA_AGENT_FLAGS='--agent.adjoint_eta=0.1 --agent.consistency_alpha=0.1 --agent.meanflowql_direct_q_coef=0.0' \
+EXTRA_AGENT_FLAGS='--agent.adjoint_eta=0.1 --agent.alphaflow_alpha_mode=anneal --agent.alphaflow_alpha_floor=0.05 --agent.meanflowql_direct_q_coef=0.0' \
 bash scripts/small_scale_validation/run_humanoidmaze_large_task1.sh offline 1
 
 # A C1 diagnostic. This changes the training/sampling protocol and is not a
@@ -132,7 +142,9 @@ The important strategy parameters are:
 | --- | --- |
 | Select implementation | `AGENT_PATH=agents/meanflowql.py`, `agents/native_meanflow.py`, `agents/am_meanflow.py`, or `agents/am_meanflow_target_changed.py` |
 | Adjoint strength | `--agent.adjoint_eta` |
-| Consistency weight | `--agent.consistency_alpha` |
+| AlphaFlow target mixture | `--agent.alphaflow_alpha_mode`, `--agent.alphaflow_alpha_value`, `--agent.alphaflow_alpha_floor` |
+| EMA target update | `--agent.alphaflow_target_tau` |
+| Optional legacy pairwise loss | `--agent.consistency_alpha` |
 | Optional hybrid Direct-Q | `--agent.meanflowql_direct_q_coef` |
 | Candidate count C1/C5 | `NUM_CANDIDATES=1` or `5` / `--agent.num_candidates` |
 | Paper BC/MFI coefficient | `ALPHA` / `--agent.alpha` |
@@ -250,12 +262,14 @@ reformulated direct-map target.
 | Version | Agent | Target |
 | --- | --- | --- |
 | Original AM-MF target | `agents/am_meanflow.py` | `u_pre + eta*(t-s)*lambda`, followed by the AlphaFlow mixture |
-| AM-guided MeanFlowQL target | `agents/am_meanflow_target_changed.py` | `g_tgt=x_t+(t-1)v_AM-t D_t^[v_AM]g`, where `v_AM=v-eta*t*lambda` |
+| AM-guided MeanFlowQL target | `agents/am_meanflow_target_changed.py` | AM reformulated reward target followed by AlphaFlow reward/EMA velocity mixture |
 
 The changed version subclasses `MeanFlowQL_Agent`, keeps its three-input direct
-map `g(o,x_t,t)` and one-step sampler `g(o,epsilon,1)`, and exactly recovers the
-original MeanFlowQL target when `adjoint_eta=0`. It is neither a Native JVP
-variant nor the earlier `u_pre+eta*lambda` interval-scaling ablation.
+map `g(o,x_t,t)` and one-step sampler `g(o,epsilon,1)`, and fully inherits the
+Note/AlphaFlow frozen-pre, EMA-target, target-mixture, and exact-zero JVP
+structure. At the `alpha_AF=1` boundary it exactly recovers the original
+MeanFlowQL target when `adjoint_eta=0`. It is neither a Native JVP variant nor
+the earlier `u_pre+eta*lambda` interval-scaling ablation.
 
 Implementation and tests:
 
@@ -327,6 +341,9 @@ MUJOCO_GL=egl python main_meanflowql.py \
   --wandb_online=False \
   --agent.batch_size=32 \
   --agent.adjoint_eta=0.1 \
+  --agent.alphaflow_alpha_mode=anneal \
+  --agent.alphaflow_alpha_floor=0.05 \
+  --agent.alphaflow_target_tau=0.005 \
   --agent.meanflowql_direct_q_coef=0.0 \
   --agent.num_candidates=1 \
   --agent.action_mode=normal
@@ -336,9 +353,11 @@ Each agent fixes its own target contract: `am_meanflow.py` accepts only
 `note_average`, while `am_meanflow_target_changed.py` accepts only
 `meanflowql_reformulated_adjoint`. The original version's `alpha` controls the
 AlphaFlow mixture. The changed version's inherited `alpha` is MeanFlowQL's
-MFI/BC coefficient; its AM strength is `adjoint_eta`. Direct-Q is disabled in
-the changed version by default because Q already enters through the adjoint;
-setting `meanflowql_direct_q_coef>0` creates an explicit hybrid ablation.
+MFI/BC coefficient, its independent `alphaflow_alpha_*` parameters control the
+reward/EMA target mixture, and its AM strength is `adjoint_eta`. Direct-Q is
+disabled in the changed version by default because Q already enters through
+the adjoint; setting `meanflowql_direct_q_coef>0` creates an explicit hybrid
+ablation.
 
 ## Consistency evaluation
 

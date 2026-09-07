@@ -14,6 +14,8 @@ from agents.am_meanflow_target_changed import (
 from agents.meanflowql import MeanFlowQL_Agent, get_config as get_meanflowql_config
 from utils.am_meanflow import (
     meanflowql_adjoint_guided_velocity,
+    meanflowql_alphaflow_state,
+    meanflowql_alphaflow_target,
     meanflowql_endpoint_map,
     meanflowql_reformulated_target,
 )
@@ -53,6 +55,8 @@ def _small_config(config):
     config.use_dynamic_alpha = False
     config.consistency_alpha = 0.0
     config.bound_loss_weight = 0.0
+    config.alphaflow_alpha_mode = "fixed"
+    config.alphaflow_alpha_value = 1.0
     return config
 
 
@@ -140,6 +144,76 @@ class AMMeanFlowTargetChangedMathTest(unittest.TestCase):
                 remaining_time=jnp.ones((1, 1)),
             )
 
+    def test_direct_map_alphaflow_has_exact_endpoint_values(self):
+        state = jnp.asarray([[2.0, -1.0]])
+        time = jnp.asarray([[0.8]])
+        bootstrap_map = jnp.asarray([[0.5, 0.5]])
+        reward_target = jnp.asarray([[0.2, 0.3]])
+
+        s_one, x_s_one, _ = meanflowql_alphaflow_state(
+            state, time, jnp.asarray(1.0), bootstrap_map
+        )
+        target_one, _, _ = meanflowql_alphaflow_target(
+            state,
+            x_s_one,
+            reward_target,
+            bootstrap_map,
+            jnp.asarray(1.0),
+        )
+        np.testing.assert_allclose(s_one, time)
+        np.testing.assert_allclose(x_s_one, state)
+        np.testing.assert_allclose(target_one, reward_target, atol=1e-6)
+
+        s_zero, x_s_zero, _ = meanflowql_alphaflow_state(
+            state, time, jnp.asarray(0.0), bootstrap_map
+        )
+        target_zero, _, _ = meanflowql_alphaflow_target(
+            state,
+            x_s_zero,
+            reward_target,
+            bootstrap_map,
+            jnp.asarray(0.0),
+        )
+        expected_endpoint = meanflowql_endpoint_map(
+            state, time, bootstrap_map
+        )
+        np.testing.assert_allclose(s_zero, 0.0)
+        np.testing.assert_allclose(x_s_zero, expected_endpoint, atol=1e-6)
+        np.testing.assert_allclose(target_zero, bootstrap_map, atol=1e-6)
+
+    def test_direct_map_alphaflow_mixes_velocity_at_middle_alpha(self):
+        state = jnp.asarray([[2.0, -1.0]])
+        time = jnp.asarray([[0.8]])
+        alpha = jnp.asarray(0.25)
+        bootstrap_map = jnp.asarray([[0.5, 0.5]])
+        reward_target = jnp.asarray([[0.2, 0.3]])
+        intermediate_time, intermediate_state, _ = (
+            meanflowql_alphaflow_state(
+                state, time, alpha, bootstrap_map
+            )
+        )
+        target, reward_velocity, bootstrap_velocity = (
+            meanflowql_alphaflow_target(
+                state,
+                intermediate_state,
+                reward_target,
+                bootstrap_map,
+                alpha,
+            )
+        )
+
+        np.testing.assert_allclose(intermediate_time, [[0.2]])
+        np.testing.assert_allclose(
+            intermediate_state, [[1.1, -0.1]], atol=1e-6
+        )
+        np.testing.assert_allclose(
+            reward_velocity, [[0.9, -0.4]], atol=1e-6
+        )
+        np.testing.assert_allclose(
+            bootstrap_velocity, [[1.5, -1.5]], atol=1e-6
+        )
+        np.testing.assert_allclose(target, [[0.65, 0.225]], atol=1e-6)
+
 
 class AMMeanFlowTargetChangedAgentTest(unittest.TestCase):
     @classmethod
@@ -181,6 +255,18 @@ class AMMeanFlowTargetChangedAgentTest(unittest.TestCase):
         )
         self.assertNotIn(
             "modules_target_actor_bc_flow", agent.network.params
+        )
+        self.assertTrue(
+            _tree_allclose(
+                agent.pre_actor_params,
+                agent._actor_snapshot(agent.network.params),
+            )
+        )
+        self.assertTrue(
+            _tree_allclose(
+                agent.target_actor_params,
+                agent._actor_snapshot(agent.network.params),
+            )
         )
 
         wrong = self.config.copy_and_resolve_references()
@@ -265,6 +351,18 @@ class AMMeanFlowTargetChangedAgentTest(unittest.TestCase):
                 after["modules_actor_bc_flow"],
             )
         )
+        self.assertTrue(
+            _tree_allclose(
+                updated.pre_actor_params,
+                updated._actor_snapshot(after),
+            )
+        )
+        self.assertTrue(
+            _tree_allclose(
+                updated.target_actor_params,
+                updated._actor_snapshot(after),
+            )
+        )
 
     def test_update_uses_am_reformulated_target_without_direct_q(self):
         agent = AMMeanFlowTargetChangedAgent.create(
@@ -291,6 +389,86 @@ class AMMeanFlowTargetChangedAgentTest(unittest.TestCase):
             np.isfinite(float(info["meanflow/target_shift_norm"]))
         )
         self.assertTrue(np.isfinite(float(info["total_loss"])))
+
+    def test_update_freezes_pre_actor_and_ema_updates_target_actor(self):
+        config = self.config.copy_and_resolve_references()
+        config.alphaflow_target_tau = 0.25
+        agent = AMMeanFlowTargetChangedAgent.create(
+            40, self.observations[:1], self.actions[:1], config
+        )
+        pre_before = agent.pre_actor_params
+        target_before = agent.target_actor_params
+        updated, _ = agent.update(self.batch, current_step=1)
+        online_after = updated._actor_snapshot(updated.network.params)
+        expected_target = jax.tree_util.tree_map(
+            lambda online, target: 0.25 * online + 0.75 * target,
+            online_after,
+            target_before,
+        )
+
+        self.assertTrue(_tree_allclose(updated.pre_actor_params, pre_before))
+        self.assertTrue(
+            _tree_allclose(updated.target_actor_params, expected_target)
+        )
+        self.assertEqual(int(updated.alphaflow_updates), 1)
+
+    def test_middle_alpha_combines_am_and_ema_consistency(self):
+        config = self.config.copy_and_resolve_references()
+        config.alphaflow_alpha_value = 0.5
+        config.consistency_alpha = 0.25
+        agent = AMMeanFlowTargetChangedAgent.create(
+            41, self.observations[:1], self.actions[:1], config
+        )
+        loss, info = agent.meanflow_loss(
+            self.batch, agent.network.params, jax.random.PRNGKey(42)
+        )
+
+        self.assertAlmostEqual(float(info["alphaflow_alpha"]), 0.5)
+        self.assertAlmostEqual(float(info["jvp_branch"]), 0.0)
+        np.testing.assert_allclose(
+            loss,
+            info["mean_flow_loss"]
+            + 0.25 * info["consistency_loss"],
+            rtol=1e-6,
+        )
+        self.assertGreater(float(info["remaining_time"]), 0.0)
+        self.assertGreater(float(info["bootstrap_interval"]), 0.0)
+
+    def test_exact_zero_alpha_uses_ema_jvp_limit(self):
+        config = self.config.copy_and_resolve_references()
+        config.alphaflow_alpha_value = 0.0
+        agent = AMMeanFlowTargetChangedAgent.create(
+            43, self.observations[:1], self.actions[:1], config
+        )
+        loss, info = agent.meanflow_loss(
+            self.batch, agent.network.params, jax.random.PRNGKey(44)
+        )
+
+        self.assertAlmostEqual(float(info["alphaflow_alpha"]), 0.0)
+        self.assertAlmostEqual(float(info["jvp_branch"]), 1.0)
+        self.assertAlmostEqual(float(info["am_enabled"]), 0.0)
+        self.assertTrue(np.isfinite(float(loss)))
+
+    def test_alphaflow_schedule_anneals_from_one_to_floor(self):
+        config = self.config.copy_and_resolve_references()
+        config.alphaflow_alpha_mode = "anneal"
+        config.alphaflow_start_step = 0
+        config.alphaflow_warmup_steps = 2
+        config.alphaflow_transition_steps = 8
+        config.alphaflow_alpha_floor = 0.1
+        agent = AMMeanFlowTargetChangedAgent.create(
+            45, self.observations[:1], self.actions[:1], config
+        )
+        values = [
+            float(agent.replace(alphaflow_updates=step)._alphaflow_alpha())
+            for step in (0, 2, 6, 10)
+        ]
+
+        self.assertAlmostEqual(values[0], 1.0, places=6)
+        self.assertAlmostEqual(values[1], 1.0, places=6)
+        self.assertGreater(values[1], values[2])
+        self.assertGreater(values[2], values[3])
+        self.assertAlmostEqual(values[3], 0.1, places=6)
 
     def test_sampling_is_the_meanflowql_direct_map(self):
         agent = AMMeanFlowTargetChangedAgent.create(
@@ -328,6 +506,16 @@ class AMMeanFlowTargetChangedAgentTest(unittest.TestCase):
         restored = flax.serialization.from_state_dict(fresh, state)
         self.assertTrue(
             _tree_allclose(restored.network.params, changed.network.params)
+        )
+        self.assertTrue(
+            _tree_allclose(
+                restored.pre_actor_params, changed.pre_actor_params
+            )
+        )
+        self.assertTrue(
+            _tree_allclose(
+                restored.target_actor_params, changed.target_actor_params
+            )
         )
 
 

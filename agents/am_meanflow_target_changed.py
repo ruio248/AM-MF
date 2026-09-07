@@ -2,23 +2,27 @@
 
 The original repository's :class:`MeanFlowQL_Agent` predicts the direct map
 ``g(o, x_t, t)`` rather than a native interval-average velocity.  This agent
-keeps that network, sampler, critic, and adaptive MFI weighting, but replaces
-the behavior path velocity inside MeanFlowQL's regression target by an
-endpoint-Q-guided AM velocity.
+keeps that network, sampler, critic, and adaptive MFI weighting, embeds the
+endpoint-Q-guided AM velocity in the reformulated reward target, and then
+applies the note's frozen-pre/EMA-target AlphaFlow mixture in velocity space.
 """
 
 import copy
-from typing import ClassVar, Mapping
+from typing import Any, ClassVar, Mapping
 
-from flax.core import FrozenDict
+from flax.core import FrozenDict, unfreeze
 import jax
 import jax.numpy as jnp
 import ml_collections
 
 from agents.meanflowql import MeanFlowQL_Agent, get_config as get_meanflowql_config
 from utils.am_meanflow import (
+    alpha_flow_schedule,
+    critical_alpha,
     endpoint_reward_adjoint,
     meanflowql_adjoint_guided_velocity,
+    meanflowql_alphaflow_state,
+    meanflowql_alphaflow_target,
     meanflowql_endpoint_map,
     meanflowql_reformulated_target,
 )
@@ -33,13 +37,22 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
 
     ``g_target = x_t + (t - 1) * v_AM - t * D_t^[v_AM] g``.
 
-    ``eta=0`` exactly recovers the repository's MeanFlowQL target.  Q enters
-    through the stopped adjoint by default; the inherited direct-Q actor term
-    is exposed only as an explicit hybrid ablation.
+    At the ``alpha_AF=1`` boundary, ``eta=0`` exactly recovers the repository's
+    MeanFlowQL target.  Q enters through the stopped adjoint by default; the
+    inherited direct-Q actor term is exposed only as an explicit hybrid
+    ablation.
     """
 
     AGENT_NAME: ClassVar[str] = "am_meanflow_target_changed"
     TARGET_VARIANT: ClassVar[str] = "meanflowql_reformulated_adjoint"
+
+    # AlphaFlow actor roles are stored outside MeanFlowQL's optimizer tree.
+    # This preserves exact compatibility with existing MeanFlowQL checkpoints
+    # while still checkpointing the frozen behavior and EMA snapshots.
+    pre_actor_params: Any = None
+    target_actor_params: Any = None
+    alphaflow_updates: Any = 0
+    current_alphaflow_alpha: Any = 1.0
 
     @classmethod
     def _validate_am_config(cls, config: Mapping) -> None:
@@ -57,6 +70,83 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
             )
         if float(config.get("bound_loss_weight", 1.0)) < 0.0:
             raise ValueError("bound_loss_weight must be non-negative.")
+
+        alpha_mode = config.get("alphaflow_alpha_mode", "anneal")
+        if alpha_mode not in ("fixed", "anneal"):
+            raise ValueError(
+                "alphaflow_alpha_mode must be 'fixed' or 'anneal', got "
+                f"{alpha_mode!r}."
+            )
+        alpha_value = float(config.get("alphaflow_alpha_value", 1.0))
+        if not 0.0 <= alpha_value <= 1.0:
+            raise ValueError(
+                "alphaflow_alpha_value must be in [0, 1], got "
+                f"{alpha_value}."
+            )
+        alpha_eps = float(config.get("alphaflow_alpha_eps", 1e-4))
+        if alpha_eps <= 0.0:
+            raise ValueError("alphaflow_alpha_eps must be positive.")
+        target_tau = float(config.get("alphaflow_target_tau", 0.005))
+        if not 0.0 < target_tau <= 1.0:
+            raise ValueError("alphaflow_target_tau must be in (0, 1].")
+        if alpha_mode == "anneal":
+            alpha_floor = float(
+                config.get("alphaflow_alpha_floor", 0.05)
+            )
+            if alpha_floor <= alpha_eps:
+                raise ValueError(
+                    "annealed AlphaFlow requires alphaflow_alpha_floor > "
+                    "alphaflow_alpha_eps; use fixed alpha=0 for the exact "
+                    "JVP consistency limit."
+                )
+            alpha_flow_schedule(
+                0,
+                int(config.get("alphaflow_start_step", 0)),
+                int(config.get("alphaflow_warmup_steps", 50000)),
+                int(config.get("alphaflow_transition_steps", 400000)),
+                alpha_floor,
+                float(config.get("alphaflow_gamma", 8.0)),
+            )
+
+    @staticmethod
+    def _actor_snapshot(params):
+        """Extract every actor/actor-encoder subtree from MeanFlowQL params."""
+
+        return {
+            key: copy.deepcopy(unfreeze(value))
+            for key, value in dict(params).items()
+            if key.startswith("modules_actor_bc_flow")
+        }
+
+    def _call_actor_snapshot(
+        self, snapshot, observations, state, current_time
+    ):
+        params = dict(self.network.params)
+        params.update(snapshot)
+        return self.network.select("actor_bc_flow")(
+            observations, state, current_time, params=params
+        )
+
+    def _alphaflow_alpha(self):
+        if self.config["alphaflow_alpha_mode"] == "fixed":
+            return jnp.asarray(
+                self.config["alphaflow_alpha_value"], dtype=jnp.float32
+            )
+        return alpha_flow_schedule(
+            self.alphaflow_updates,
+            self.config["alphaflow_start_step"],
+            self.config["alphaflow_warmup_steps"],
+            self.config["alphaflow_transition_steps"],
+            self.config["alphaflow_alpha_floor"],
+            self.config["alphaflow_gamma"],
+        )
+
+    def _initial_alphaflow_alpha(self):
+        if self.config["alphaflow_alpha_mode"] == "fixed":
+            return jnp.asarray(
+                self.config["alphaflow_alpha_value"], dtype=jnp.float32
+            )
+        return jnp.asarray(1.0, dtype=jnp.float32)
 
     def _aggregate_target_q(self, observations, actions):
         critic_actions = (
@@ -84,10 +174,11 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
         """Differentiate target-Q through MeanFlowQL's implied endpoint."""
 
         def endpoint_fn(current_state):
-            # No grad_params: this is the frozen current actor snapshot held by
-            # self.network while apply_loss_fn optimizes a candidate tree.
-            direct_map = self.network.select("actor_bc_flow")(
-                observations, current_state, current_time
+            direct_map = self._call_actor_snapshot(
+                self.target_actor_params,
+                observations,
+                current_state,
+                current_time,
             )
             return meanflowql_endpoint_map(
                 current_state, current_time, direct_map
@@ -112,76 +203,234 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
             return time_values[indices].reshape(-1, 1)
         return jax.random.uniform(rng, (batch_size, 1))
 
-    def _meanflowql_loss(self, batch, grad_params, rng, use_am):
-        """Evaluate baseline or AM-guided reformulated MeanFlowQL MFI."""
-
+    def _sample_path(self, batch, time_rng, noise_rng):
         batch_size = batch["actions"].shape[0]
-        consistency_rng, time_rng, _, noise_rng = jax.random.split(rng, 4)
         current_time = self._sample_meanflowql_time(time_rng, batch_size)
-        target_time = jnp.zeros_like(current_time)
-
         actions = batch["actions"]
         noise = self.sample_noise(noise_rng, actions.shape)
         state = (1.0 - current_time) * actions + current_time * noise
-        conditional_velocity = noise - actions
+        return state, current_time, noise - actions
 
-        if use_am:
-            endpoint, adjoint = self._meanflowql_endpoint_and_adjoint(
-                batch["observations"], state, current_time
-            )
-        else:
-            endpoint = actions
-            adjoint = jnp.zeros_like(conditional_velocity)
-
-        guided_velocity = meanflowql_adjoint_guided_velocity(
-            conditional_velocity,
-            adjoint,
-            self.config["adjoint_eta"] if use_am else 0.0,
-            current_time - target_time,
-        )
-
+    def _baseline_target(
+        self, observations, state, current_time, velocity, grad_params
+    ):
         actor = self.network.select("actor_bc_flow")
 
         def direct_map(current_state, time):
             return actor(
-                batch["observations"],
+                observations,
                 current_state,
                 time,
                 params=grad_params,
             )
 
-        prediction, total_derivative = jax.jvp(
+        prediction, derivative = jax.jvp(
             direct_map,
             (state, current_time),
-            (guided_velocity, jnp.ones_like(current_time)),
+            (velocity, jnp.ones_like(current_time)),
         )
         target = meanflowql_reformulated_target(
             state,
-            target_time,
+            jnp.zeros_like(current_time),
             current_time,
+            velocity,
+            derivative,
+        )
+        return prediction, jnp.clip(
+            jax.lax.stop_gradient(target), -5.0, 5.0
+        )
+
+    def _positive_alphaflow_loss(
+        self, batch, grad_params, rng, alpha
+    ):
+        """Wrap the AM changed target in the note's AlphaFlow mixture."""
+
+        consistency_rng, time_rng, _, noise_rng = jax.random.split(rng, 4)
+        state, current_time, conditional_velocity = self._sample_path(
+            batch, time_rng, noise_rng
+        )
+        observations = batch["observations"]
+
+        bootstrap_direct_map = self._call_actor_snapshot(
+            self.target_actor_params,
+            observations,
+            state,
+            current_time,
+        )
+        intermediate_time, intermediate_state, bootstrap_velocity = (
+            meanflowql_alphaflow_state(
+                state,
+                current_time,
+                alpha,
+                bootstrap_direct_map,
+            )
+        )
+        intermediate_state = jax.lax.stop_gradient(intermediate_state)
+
+        endpoint, adjoint = self._meanflowql_endpoint_and_adjoint(
+            observations, intermediate_state, intermediate_time
+        )
+        guided_velocity = meanflowql_adjoint_guided_velocity(
+            conditional_velocity,
+            adjoint,
+            self.config["adjoint_eta"],
+            intermediate_time,
+        )
+
+        def pre_direct_map(current_state, time):
+            return self._call_actor_snapshot(
+                self.pre_actor_params,
+                observations,
+                current_state,
+                time,
+            )
+
+        _, reward_derivative = jax.jvp(
+            pre_direct_map,
+            (intermediate_state, intermediate_time),
+            (guided_velocity, jnp.ones_like(intermediate_time)),
+        )
+        reward_direct_target = meanflowql_reformulated_target(
+            intermediate_state,
+            jnp.zeros_like(intermediate_time),
+            intermediate_time,
             guided_velocity,
-            total_derivative,
+            reward_derivative,
+        )
+        reward_direct_target = jnp.clip(
+            jax.lax.stop_gradient(reward_direct_target), -5.0, 5.0
+        )
+        target, reward_velocity, bootstrap_velocity = (
+            meanflowql_alphaflow_target(
+                state,
+                intermediate_state,
+                reward_direct_target,
+                bootstrap_direct_map,
+                alpha,
+            )
         )
         target = jnp.clip(jax.lax.stop_gradient(target), -5.0, 5.0)
 
-        # Compute the exact unguided MeanFlowQL target with the same sample and
-        # actor.  This is a diagnostic only and is stopped before logging.
-        _, baseline_derivative = jax.jvp(
-            direct_map,
-            (state, current_time),
-            (conditional_velocity, jnp.ones_like(current_time)),
+        prediction = self.network.select("actor_bc_flow")(
+            observations, state, current_time, params=grad_params
         )
-        baseline_target = meanflowql_reformulated_target(
+        error = prediction - target
+        meanflow_loss = self.adaptive_l2_loss(
+            error, current_time, mode="normal"
+        )
+        if self.config["normalize_alphaflow_loss_by_alpha"]:
+            meanflow_loss = meanflow_loss / jnp.maximum(
+                alpha, self.config["alphaflow_alpha_eps"]
+            )
+
+        consistency_loss = self.consistency_loss(
+            batch, grad_params, consistency_rng
+        )
+        flow_loss = (
+            meanflow_loss
+            + self.config.get("consistency_alpha", 0.0)
+            * consistency_loss
+        )
+        _, baseline_target = self._baseline_target(
+            observations,
             state,
-            target_time,
             current_time,
             conditional_velocity,
-            baseline_derivative,
+            grad_params,
         )
-        baseline_target = jnp.clip(
-            jax.lax.stop_gradient(baseline_target), -5.0, 5.0
+        student_velocity = state - prediction
+        reward_error = student_velocity - jax.lax.stop_gradient(
+            reward_velocity
         )
+        bootstrap_error = student_velocity - jax.lax.stop_gradient(
+            bootstrap_velocity
+        )
+        critical, tfm_a, tfm_b, tc_c = critical_alpha(
+            reward_error, bootstrap_error
+        )
+        correction = guided_velocity - conditional_velocity
 
+        return flow_loss, {
+            "mean_flow_loss": meanflow_loss,
+            "consistency_loss": consistency_loss,
+            "flow_loss": flow_loss,
+            "am_enabled": jnp.asarray(1.0),
+            "alphaflow_alpha": alpha,
+            "critical_alpha": critical,
+            "jvp_branch": jnp.asarray(0.0),
+            "reward_target_loss": jnp.mean(jnp.square(reward_error)),
+            "bootstrap_loss": jnp.mean(jnp.square(bootstrap_error)),
+            "mixed_target_loss": jnp.mean(jnp.square(error)),
+            "adjoint_norm": jnp.linalg.norm(adjoint, axis=-1).mean(),
+            "correction_norm": jnp.linalg.norm(
+                correction, axis=-1
+            ).mean(),
+            "conditional_velocity_norm": jnp.linalg.norm(
+                conditional_velocity, axis=-1
+            ).mean(),
+            "guided_velocity_norm": jnp.linalg.norm(
+                guided_velocity, axis=-1
+            ).mean(),
+            "derivative_norm": jnp.linalg.norm(
+                reward_derivative, axis=-1
+            ).mean(),
+            "target_norm": jnp.linalg.norm(target, axis=-1).mean(),
+            "baseline_target_norm": jnp.linalg.norm(
+                baseline_target, axis=-1
+            ).mean(),
+            "target_shift_norm": jnp.linalg.norm(
+                target - baseline_target, axis=-1
+            ).mean(),
+            "remaining_time": intermediate_time.mean(),
+            "bootstrap_interval": (
+                current_time - intermediate_time
+            ).mean(),
+            "endpoint_q": self._aggregate_target_q(
+                observations, endpoint
+            ).mean(),
+            "endpoint_out_of_bounds_fraction": (
+                jnp.abs(endpoint) > 1.0
+            ).mean(),
+            "tfm_a": tfm_a,
+            "tfm_b": tfm_b,
+            "tc_c": tc_c,
+        }
+
+    def _zero_alphaflow_loss(self, batch, grad_params, rng, alpha):
+        """Use the exact EMA MeanFlowQL JVP consistency limit at alpha=0."""
+
+        consistency_rng, time_rng, _, noise_rng = jax.random.split(rng, 4)
+        state, current_time, conditional_velocity = self._sample_path(
+            batch, time_rng, noise_rng
+        )
+        observations = batch["observations"]
+
+        def target_direct_map(current_state, time):
+            return self._call_actor_snapshot(
+                self.target_actor_params,
+                observations,
+                current_state,
+                time,
+            )
+
+        bootstrap_direct_map = target_direct_map(state, current_time)
+        bootstrap_velocity = state - bootstrap_direct_map
+        _, derivative = jax.jvp(
+            target_direct_map,
+            (state, current_time),
+            (bootstrap_velocity, jnp.ones_like(current_time)),
+        )
+        target = meanflowql_reformulated_target(
+            state,
+            jnp.zeros_like(current_time),
+            current_time,
+            bootstrap_velocity,
+            derivative,
+        )
+        target = jnp.clip(jax.lax.stop_gradient(target), -5.0, 5.0)
+        prediction = self.network.select("actor_bc_flow")(
+            observations, state, current_time, params=grad_params
+        )
         error = prediction - target
         meanflow_loss = self.adaptive_l2_loss(
             error, current_time, mode="normal"
@@ -194,30 +443,40 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
             + self.config.get("consistency_alpha", 0.0)
             * consistency_loss
         )
-        correction = guided_velocity - conditional_velocity
-        target_q = (
-            self._aggregate_target_q(batch["observations"], endpoint).mean()
-            if use_am
-            else jnp.asarray(0.0)
+        _, baseline_target = self._baseline_target(
+            observations,
+            state,
+            current_time,
+            conditional_velocity,
+            grad_params,
         )
-
+        endpoint = meanflowql_endpoint_map(
+            state, current_time, bootstrap_direct_map
+        )
+        zeros = jnp.asarray(0.0)
         return flow_loss, {
             "mean_flow_loss": meanflow_loss,
             "consistency_loss": consistency_loss,
             "flow_loss": flow_loss,
-            "am_enabled": jnp.asarray(float(use_am)),
-            "adjoint_norm": jnp.linalg.norm(adjoint, axis=-1).mean(),
-            "correction_norm": jnp.linalg.norm(
-                correction, axis=-1
-            ).mean(),
+            "am_enabled": zeros,
+            "alphaflow_alpha": alpha,
+            "critical_alpha": zeros,
+            "jvp_branch": jnp.asarray(1.0),
+            "reward_target_loss": zeros,
+            "bootstrap_loss": jnp.mean(
+                jnp.square(prediction - bootstrap_direct_map)
+            ),
+            "mixed_target_loss": jnp.mean(jnp.square(error)),
+            "adjoint_norm": zeros,
+            "correction_norm": zeros,
             "conditional_velocity_norm": jnp.linalg.norm(
                 conditional_velocity, axis=-1
             ).mean(),
             "guided_velocity_norm": jnp.linalg.norm(
-                guided_velocity, axis=-1
+                bootstrap_velocity, axis=-1
             ).mean(),
             "derivative_norm": jnp.linalg.norm(
-                total_derivative, axis=-1
+                derivative, axis=-1
             ).mean(),
             "target_norm": jnp.linalg.norm(target, axis=-1).mean(),
             "baseline_target_norm": jnp.linalg.norm(
@@ -226,12 +485,48 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
             "target_shift_norm": jnp.linalg.norm(
                 target - baseline_target, axis=-1
             ).mean(),
-            "remaining_time": current_time.mean(),
-            "endpoint_q": target_q,
+            "remaining_time": zeros,
+            "bootstrap_interval": current_time.mean(),
+            "endpoint_q": self._aggregate_target_q(
+                observations, endpoint
+            ).mean(),
             "endpoint_out_of_bounds_fraction": (
                 jnp.abs(endpoint) > 1.0
             ).mean(),
+            "tfm_a": zeros,
+            "tfm_b": zeros,
+            "tc_c": zeros,
         }
+
+    def _meanflowql_loss(self, batch, grad_params, rng, use_am):
+        """Evaluate baseline pretraining or full AM-AlphaFlow refinement."""
+
+        if not use_am:
+            loss, info = MeanFlowQL_Agent.meanflow_loss(
+                self, batch, grad_params, rng
+            )
+            info = dict(info)
+            info.update(
+                {
+                    "am_enabled": jnp.asarray(0.0),
+                    "alphaflow_alpha": jnp.asarray(1.0),
+                    "jvp_branch": jnp.asarray(0.0),
+                }
+            )
+            return loss, info
+
+        alpha = self._alphaflow_alpha()
+        if (
+            self.config["alphaflow_alpha_mode"] == "fixed"
+            and self.config["alphaflow_alpha_value"]
+            <= self.config["alphaflow_alpha_eps"]
+        ):
+            return self._zero_alphaflow_loss(
+                batch, grad_params, rng, alpha
+            )
+        return self._positive_alphaflow_loss(
+            batch, grad_params, rng, alpha
+        )
 
     def meanflow_loss(self, batch, grad_params, rng):
         """Train with AM inside the reformulated MeanFlowQL target."""
@@ -292,6 +587,29 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
         }
 
     @jax.jit
+    def update(self, batch, current_step=0):
+        """Run MeanFlowQL update, then advance the AlphaFlow EMA actor."""
+
+        updated, info = MeanFlowQL_Agent.update(
+            self, batch, current_step=current_step
+        )
+        online_actor = self._actor_snapshot(updated.network.params)
+        target_actor = jax.tree_util.tree_map(
+            lambda online, target: (
+                self.config["alphaflow_target_tau"] * online
+                + (1.0 - self.config["alphaflow_target_tau"]) * target
+            ),
+            online_actor,
+            self.target_actor_params,
+        )
+        alpha = self._alphaflow_alpha()
+        return updated.replace(
+            target_actor_params=target_actor,
+            alphaflow_updates=self.alphaflow_updates + 1,
+            current_alphaflow_alpha=alpha,
+        ), info
+
+    @jax.jit
     def pretrain(self, batch, current_step=None):
         """Pretrain the unmodified MeanFlowQL target without critic guidance."""
 
@@ -303,6 +621,7 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
             )
 
         network, info = self.network.apply_loss_fn(loss_fn=pretrain_loss)
+        online_actor = self._actor_snapshot(network.params)
         if current_step is not None:
             actor_schedule = self.config.get("actor_lr_schedule")
             critic_schedule = self.config.get("critic_lr_schedule")
@@ -314,7 +633,25 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
                 info["metrics/critic_learning_rate"] = critic_schedule(
                     current_step
                 )
-        return self.replace(network=network, rng=new_rng), info
+        return self.replace(
+            network=network,
+            rng=new_rng,
+            pre_actor_params=online_actor,
+            target_actor_params=copy.deepcopy(online_actor),
+            alphaflow_updates=jnp.asarray(0, dtype=jnp.int32),
+            current_alphaflow_alpha=self._initial_alphaflow_alpha(),
+        ), info
+
+    def initialize_alphaflow_stage(self):
+        """Freeze behavior actor and initialize the EMA actor explicitly."""
+
+        online_actor = self._actor_snapshot(self.network.params)
+        return self.replace(
+            pre_actor_params=copy.deepcopy(online_actor),
+            target_actor_params=copy.deepcopy(online_actor),
+            alphaflow_updates=jnp.asarray(0, dtype=jnp.int32),
+            current_alphaflow_alpha=self._initial_alphaflow_alpha(),
+        )
 
     @classmethod
     def from_meanflowql_agent(cls, meanflowql_agent, config=None):
@@ -327,6 +664,16 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
             "adjoint_eta",
             "clip_actions_for_critic",
             "meanflowql_direct_q_coef",
+            "alphaflow_alpha_mode",
+            "alphaflow_alpha_value",
+            "alphaflow_start_step",
+            "alphaflow_warmup_steps",
+            "alphaflow_transition_steps",
+            "alphaflow_alpha_floor",
+            "alphaflow_gamma",
+            "alphaflow_alpha_eps",
+            "alphaflow_target_tau",
+            "normalize_alphaflow_loss_by_alpha",
         ):
             merged[key] = changed_defaults[key]
         if config is not None:
@@ -336,6 +683,7 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
         merged["agent_name"] = cls.AGENT_NAME
         merged["am_target_variant"] = cls.TARGET_VARIANT
         cls._validate_am_config(merged)
+        online_actor = cls._actor_snapshot(meanflowql_agent.network.params)
         return cls(
             rng=meanflowql_agent.rng,
             network=meanflowql_agent.network,
@@ -343,6 +691,10 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
             current_alpha=meanflowql_agent.current_alpha,
             loss_history=meanflowql_agent.loss_history,
             valid_count=meanflowql_agent.valid_count,
+            pre_actor_params=copy.deepcopy(online_actor),
+            target_actor_params=copy.deepcopy(online_actor),
+            alphaflow_updates=jnp.asarray(0, dtype=jnp.int32),
+            current_alphaflow_alpha=jnp.asarray(1.0, dtype=jnp.float32),
         )
 
     @classmethod
@@ -350,8 +702,15 @@ class AMMeanFlowTargetChangedAgent(MeanFlowQL_Agent):
         local_config = copy.deepcopy(config)
         local_config["agent_name"] = cls.AGENT_NAME
         cls._validate_am_config(local_config)
-        return super().create(
+        agent = super().create(
             seed, ex_observations, ex_actions, local_config
+        )
+        online_actor = cls._actor_snapshot(agent.network.params)
+        return agent.replace(
+            pre_actor_params=copy.deepcopy(online_actor),
+            target_actor_params=copy.deepcopy(online_actor),
+            alphaflow_updates=jnp.asarray(0, dtype=jnp.int32),
+            current_alphaflow_alpha=agent._initial_alphaflow_alpha(),
         )
 
 
@@ -367,4 +726,22 @@ def get_config():
     # Q enters through the AM target.  A nonzero value deliberately recreates
     # a hybrid with MeanFlowQL's original direct policy-gradient term.
     config.meanflowql_direct_q_coef = 0.0
+
+    # This alpha is deliberately separate from MeanFlowQL's `alpha`, which
+    # remains the outer MFI/BC coefficient used by the paper configuration.
+    config.alphaflow_alpha_mode = "anneal"
+    config.alphaflow_alpha_value = 1.0
+    config.alphaflow_start_step = 0
+    config.alphaflow_warmup_steps = 50000
+    config.alphaflow_transition_steps = 400000
+    config.alphaflow_alpha_floor = 0.05
+    config.alphaflow_gamma = 8.0
+    config.alphaflow_alpha_eps = 1e-4
+    config.alphaflow_target_tau = 0.005
+    config.normalize_alphaflow_loss_by_alpha = True
+
+    # The note-style EMA bootstrap is the default consistency mechanism.
+    # Keep the older pairwise endpoint MSE available only as an explicit
+    # supplemental ablation.
+    config.consistency_alpha = 0.0
     return ml_collections.ConfigDict(config)
