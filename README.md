@@ -26,6 +26,15 @@ python download_all_datasets.py
 OGBench datasets are stored in `./dataset`. Run download and training commands
 from the repository root.
 
+## Two-task small-scale validation
+
+Runnable paper-style launch scripts for `humanoidmaze-large-navigate-singletask-task1-v0`
+and `relocate-cloned-v1` are in `scripts/small_scale_validation/`. They do not
+commit results or launch automatically. See
+[docs/SMALL_SCALE_VALIDATION.md](docs/SMALL_SCALE_VALIDATION.md) for the paper
+numbers, C1/C5 interpretation, exact command examples, and agent parameter
+names for MeanFlowQL, Native MeanFlow, and both AM-MF variants.
+
 ## Native MeanFlow
 
 This repository also contains an isolated native MeanFlow baseline. Unlike the
