@@ -1,0 +1,164 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="900" viewBox="0 0 1500 900" role="img" aria-labelledby="title desc">
+  <title id="title">AM-MF algorithm pipeline</title>
+  <desc id="desc">MeanFlowQL training pipeline showing endpoint adjoint guidance inside the target, endpoint consistency regularization, and optional direct-Q optimization.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8fbff"/>
+      <stop offset="100%" stop-color="#f7f3ff"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#183b66"/>
+      <stop offset="100%" stop-color="#5b3f91"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#183b66" flood-opacity="0.14"/>
+    </filter>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#3467a4"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#7b4ab0"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2f8f72"/>
+    </marker>
+    <marker id="arrowOrange" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#d66b2c"/>
+    </marker>
+    <style>
+      .title { font-family: Arial, Helvetica, sans-serif; font-size: 34px; font-weight: 700; fill: #ffffff; }
+      .subtitle { font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 400; fill: #dce9f8; }
+      .section { font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; letter-spacing: 0.7px; }
+      .box-title { font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; fill: #19324d; }
+      .box-text { font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: 400; fill: #31465b; }
+      .formula { font-family: "Times New Roman", "STIX Two Math", serif; font-size: 17px; font-style: italic; font-weight: 400; fill: #24384d; }
+      .small { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 400; fill: #52677c; }
+      .chip { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; fill: #ffffff; }
+      .arrow-label { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 600; }
+    </style>
+  </defs>
+
+  <rect width="1500" height="900" rx="24" fill="url(#background)"/>
+  <rect x="0" y="0" width="1500" height="105" rx="24" fill="url(#header)"/>
+  <rect x="0" y="82" width="1500" height="23" fill="url(#header)"/>
+  <text x="54" y="52" class="title">AM-MF: Adjoint- and Consistency-Guided MeanFlowQL</text>
+  <text x="55" y="82" class="subtitle">Adjoint changes the MeanFlowQL regression target · Consistency regularizes the implied endpoint map</text>
+
+  <text x="55" y="148" class="section" fill="#3467a4">1 · MEANFLOWQL BASELINE</text>
+  <text x="520" y="148" class="section" fill="#7b4ab0">2 · ADJOINT TARGET GUIDANCE</text>
+  <text x="1010" y="148" class="section" fill="#2f8f72">3 · CONSISTENCY REGULARIZATION</text>
+
+  <!-- Base path -->
+  <g filter="url(#shadow)">
+    <rect x="55" y="178" width="345" height="112" rx="16" fill="#ffffff" stroke="#b8cde5" stroke-width="2"/>
+    <rect x="55" y="178" width="8" height="112" rx="4" fill="#3467a4"/>
+  </g>
+  <text x="82" y="211" class="box-title">MeanFlowQL training inputs</text>
+  <text x="82" y="239" class="formula">(o, a, r, o′),  ε ∼ 𝒩(0, I),  t</text>
+  <text x="82" y="267" class="small">Same data, seeds and budget for every strategy</text>
+
+  <g filter="url(#shadow)">
+    <rect x="55" y="337" width="345" height="124" rx="16" fill="#ffffff" stroke="#b8cde5" stroke-width="2"/>
+    <rect x="55" y="337" width="8" height="124" rx="4" fill="#3467a4"/>
+  </g>
+  <text x="82" y="370" class="box-title">MeanFlowQL noisy-action path</text>
+  <text x="82" y="400" class="formula">xₜ = (1 − t)a + tε</text>
+  <text x="82" y="429" class="formula">v = ε − a</text>
+  <text x="82" y="449" class="small">MeanFlowQL action-to-noise conditional path</text>
+
+  <g filter="url(#shadow)">
+    <rect x="55" y="511" width="345" height="124" rx="16" fill="#ffffff" stroke="#b8cde5" stroke-width="2"/>
+    <rect x="55" y="511" width="8" height="124" rx="4" fill="#3467a4"/>
+  </g>
+  <text x="82" y="544" class="box-title">MeanFlowQL direct-map actor</text>
+  <text x="82" y="574" class="formula">gθ(o, xₜ, t)</text>
+  <text x="82" y="602" class="formula">F<tspan baseline-shift="sub" font-size="12">g</tspan> = (1 − t)xₜ + t gθ</text>
+  <text x="82" y="624" class="small">F_g is the MeanFlowQL endpoint/action implied at time t</text>
+
+  <path d="M227 290 L227 337" stroke="#3467a4" stroke-width="3" fill="none" marker-end="url(#arrowBlue)"/>
+  <path d="M227 461 L227 511" stroke="#3467a4" stroke-width="3" fill="none" marker-end="url(#arrowBlue)"/>
+
+  <!-- Adjoint path -->
+  <g filter="url(#shadow)">
+    <rect x="520" y="178" width="420" height="112" rx="16" fill="#fbf8ff" stroke="#c6addf" stroke-width="2"/>
+    <rect x="520" y="178" width="8" height="112" rx="4" fill="#7b4ab0"/>
+  </g>
+  <text x="548" y="211" class="box-title">Frozen target critic at endpoint</text>
+  <text x="548" y="240" class="formula">Q̄φ(o, F<tspan baseline-shift="sub" font-size="12">g</tspan>)</text>
+  <text x="548" y="267" class="small">Differentiate reward/value through the implied endpoint</text>
+
+  <g filter="url(#shadow)">
+    <rect x="520" y="337" width="420" height="124" rx="16" fill="#fbf8ff" stroke="#c6addf" stroke-width="2"/>
+    <rect x="520" y="337" width="8" height="124" rx="4" fill="#7b4ab0"/>
+  </g>
+  <text x="548" y="370" class="box-title">Endpoint adjoint and guided velocity</text>
+  <text x="548" y="400" class="formula">λₜ = J<tspan baseline-shift="sub" font-size="12">Fg</tspan>(xₜ)ᵀ ∇<tspan baseline-shift="sub" font-size="12">a</tspan> Q̄φ(o, F<tspan baseline-shift="sub" font-size="12">g</tspan>)</text>
+  <text x="548" y="430" class="formula">v<tspan baseline-shift="sub" font-size="12">AM</tspan> = v − ηtλₜ</text>
+  <text x="548" y="452" class="small">η = --agent.adjoint_eta · λ and endpoint are stop-gradient</text>
+
+  <g filter="url(#shadow)">
+    <rect x="520" y="511" width="420" height="124" rx="16" fill="#fbf8ff" stroke="#c6addf" stroke-width="2"/>
+    <rect x="520" y="511" width="8" height="124" rx="4" fill="#7b4ab0"/>
+  </g>
+  <text x="548" y="544" class="box-title">AM-guided MeanFlowQL target</text>
+  <text x="548" y="574" class="formula">D<tspan baseline-shift="sub" font-size="12">t</tspan><tspan baseline-shift="super" font-size="12">[vAM]</tspan> gθ  (JVP)</text>
+  <text x="548" y="603" class="formula">g<tspan baseline-shift="sub" font-size="12">tgt</tspan><tspan baseline-shift="super" font-size="12">AM</tspan> = xₜ + (t−1)v<tspan baseline-shift="sub" font-size="12">AM</tspan> − tD<tspan baseline-shift="sub" font-size="12">t</tspan><tspan baseline-shift="super" font-size="12">[vAM]</tspan>gθ</text>
+  <text x="548" y="625" class="small">η = 0 exactly recovers the original MeanFlowQL target</text>
+
+  <path d="M400 574 C455 574 465 234 520 234" stroke="#7b4ab0" stroke-width="3" fill="none" marker-end="url(#arrowPurple)"/>
+  <text x="424" y="389" class="arrow-label" fill="#7b4ab0">F_g</text>
+  <path d="M730 290 L730 337" stroke="#7b4ab0" stroke-width="3" fill="none" marker-end="url(#arrowPurple)"/>
+  <path d="M730 461 L730 511" stroke="#7b4ab0" stroke-width="3" fill="none" marker-end="url(#arrowPurple)"/>
+  <path d="M400 399 C462 399 470 399 520 399" stroke="#3467a4" stroke-width="2.5" fill="none" marker-end="url(#arrowBlue)"/>
+  <text x="462" y="389" class="arrow-label" fill="#3467a4">v</text>
+
+  <!-- Consistency path -->
+  <g filter="url(#shadow)">
+    <rect x="1010" y="178" width="435" height="135" rx="16" fill="#f5fcf9" stroke="#9fd4c3" stroke-width="2"/>
+    <rect x="1010" y="178" width="8" height="135" rx="4" fill="#2f8f72"/>
+  </g>
+  <text x="1038" y="211" class="box-title">Shared sample at two times</text>
+  <text x="1038" y="240" class="formula">x<tspan baseline-shift="sub" font-size="12">t₁</tspan> = (1−t₁)a + t₁ε</text>
+  <text x="1038" y="268" class="formula">x<tspan baseline-shift="sub" font-size="12">t₂</tspan> = (1−t₂)a + t₂ε</text>
+  <text x="1038" y="294" class="small">Same observation, action and Gaussian noise</text>
+
+  <g filter="url(#shadow)">
+    <rect x="1010" y="360" width="435" height="124" rx="16" fill="#f5fcf9" stroke="#9fd4c3" stroke-width="2"/>
+    <rect x="1010" y="360" width="8" height="124" rx="4" fill="#2f8f72"/>
+  </g>
+  <text x="1038" y="393" class="box-title">Endpoint agreement</text>
+  <text x="1038" y="423" class="formula">F<tspan baseline-shift="sub" font-size="12">g</tspan>(t₁) = (1−t₁)x<tspan baseline-shift="sub" font-size="12">t₁</tspan> + t₁gθ(o,x<tspan baseline-shift="sub" font-size="12">t₁</tspan>,t₁)</text>
+  <text x="1038" y="453" class="formula">F̄<tspan baseline-shift="sub" font-size="12">g</tspan>(t₂) = stopgrad(endpoint at t₂)</text>
+  <text x="1038" y="476" class="small">Only the t₁ branch receives this regularizer gradient</text>
+
+  <g filter="url(#shadow)">
+    <rect x="1010" y="531" width="435" height="104" rx="16" fill="#f5fcf9" stroke="#9fd4c3" stroke-width="2"/>
+    <rect x="1010" y="531" width="8" height="104" rx="4" fill="#2f8f72"/>
+  </g>
+  <text x="1038" y="564" class="box-title">Consistency loss</text>
+  <text x="1038" y="595" class="formula">ℒ<tspan baseline-shift="sub" font-size="12">cons</tspan> = 𝔼 ‖F<tspan baseline-shift="sub" font-size="12">g</tspan>(t₁) − F̄<tspan baseline-shift="sub" font-size="12">g</tspan>(t₂)‖²<tspan baseline-shift="sub" font-size="12">2</tspan></text>
+  <text x="1038" y="620" class="small">β_cons = --agent.consistency_alpha</text>
+
+  <path d="M1227 313 L1227 360" stroke="#2f8f72" stroke-width="3" fill="none" marker-end="url(#arrowGreen)"/>
+  <path d="M1227 484 L1227 531" stroke="#2f8f72" stroke-width="3" fill="none" marker-end="url(#arrowGreen)"/>
+
+  <!-- Merge and update -->
+  <g filter="url(#shadow)">
+    <rect x="250" y="710" width="1000" height="120" rx="20" fill="#ffffff" stroke="#7c91aa" stroke-width="2.5"/>
+  </g>
+  <rect x="274" y="731" width="104" height="27" rx="13" fill="#7b4ab0"/>
+  <text x="291" y="750" class="chip">TARGET</text>
+  <rect x="390" y="731" width="137" height="27" rx="13" fill="#2f8f72"/>
+  <text x="407" y="750" class="chip">REGULARIZER</text>
+  <rect x="539" y="731" width="116" height="27" rx="13" fill="#d66b2c"/>
+  <text x="556" y="750" class="chip">OPTIONAL</text>
+  <text x="274" y="791" class="formula">ℒ<tspan baseline-shift="sub" font-size="12">actor</tspan> = ℒ<tspan baseline-shift="sub" font-size="12">MFI</tspan>(gθ, stopgrad(g<tspan baseline-shift="sub" font-size="12">tgt</tspan><tspan baseline-shift="super" font-size="12">AM</tspan>)) + β<tspan baseline-shift="sub" font-size="12">cons</tspan>ℒ<tspan baseline-shift="sub" font-size="12">cons</tspan> + β<tspan baseline-shift="sub" font-size="12">Q</tspan>ℒ<tspan baseline-shift="sub" font-size="12">direct-Q</tspan> + ℒ<tspan baseline-shift="sub" font-size="12">bound</tspan></text>
+  <text x="274" y="815" class="small">Default changed-target AM-MF: β_Q = --agent.meanflowql_direct_q_coef = 0; C5 inference samples 5 actions and selects argmax Q</text>
+
+  <path d="M730 635 C730 674 680 686 650 710" stroke="#7b4ab0" stroke-width="3" fill="none" marker-end="url(#arrowPurple)"/>
+  <path d="M1227 635 C1227 679 1100 694 1035 710" stroke="#2f8f72" stroke-width="3" fill="none" marker-end="url(#arrowGreen)"/>
+  <path d="M400 616 C440 659 480 680 515 710" stroke="#d66b2c" stroke-width="2.5" stroke-dasharray="8 7" fill="none" marker-end="url(#arrowOrange)"/>
+  <text x="411" y="668" class="arrow-label" fill="#d66b2c">optional direct-Q</text>
+
+  <text x="55" y="872" class="small">Solid purple: adjoint modifies the regression target · Solid green: endpoint consistency loss · Dashed orange: optional hybrid Direct-Q branch</text>
+</svg>

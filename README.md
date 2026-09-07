@@ -3,7 +3,7 @@
 [![arXiv](https://img.shields.io/badge/Paper-arXiv-FFB6C1.svg)](https://arxiv.org/abs/2511.13035)
 
 <p align="center">
-  <img src="./toy_example/teaser.png" width="65%">
+  <img src="./docs/assets/am_mf_pipeline.svg" width="96%" alt="AM-MF algorithm pipeline: adjoint target guidance and consistency regularization in MeanFlowQL">
 </p>
 
 
@@ -26,14 +26,123 @@ python download_all_datasets.py
 OGBench datasets are stored in `./dataset`. Run download and training commands
 from the repository root.
 
-## Two-task small-scale validation
+## How adjoint and consistency enter MeanFlowQL
 
-Runnable paper-style launch scripts for `humanoidmaze-large-navigate-singletask-task1-v0`
-and `relocate-cloned-v1` are in `scripts/small_scale_validation/`. They do not
-commit results or launch automatically. See
-[docs/SMALL_SCALE_VALIDATION.md](docs/SMALL_SCALE_VALIDATION.md) for the paper
-numbers, C1/C5 interpretation, exact command examples, and agent parameter
-names for MeanFlowQL, Native MeanFlow, and both AM-MF variants.
+The current primary AM-MF variant keeps MeanFlowQL's direct-map actor
+$g_\theta(o,x_t,t)$ and changes the regression target rather than replacing
+the policy architecture. Its implied action endpoint is
+
+$$
+F_g(o,x_t,t)=(1-t)x_t+t\,g_\theta(o,x_t,t).
+$$
+
+The target critic differentiates through this endpoint to produce the stopped
+adjoint
+
+$$
+\lambda_t
+=J_{F_g}(x_t)^{\mathsf T}
+\nabla_a\bar Q_\phi\!\left(o,F_g(o,x_t,t)\right),
+\qquad
+v_{\mathrm{AM}}=v-\eta t\lambda_t.
+$$
+
+Here $\eta$ is controlled by `--agent.adjoint_eta`. The guided velocity
+$v_{\mathrm{AM}}$ replaces the original conditional velocity in both the MeanFlowQL
+target and its JVP:
+
+$$
+g_{\mathrm{tgt}}^{\mathrm{AM}}
+=x_t+(t-1)v_{\mathrm{AM}}
+-tD_t^{[v_{\mathrm{AM}}]}g_\theta.
+$$
+
+`--agent.adjoint_eta=0` therefore recovers the original MeanFlowQL target.
+The consistency branch uses the same observation, data action, and Gaussian
+noise at two sampled times. It penalizes disagreement between their implied
+endpoints:
+
+$$
+\mathcal L_{\mathrm{cons}}
+=\mathbb E\!\left[
+\left\|F_g(t_1)-\operatorname{sg}\!\left(F_g(t_2)\right)\right\|_2^2
+\right],
+$$
+
+$$
+\mathcal L_{\mathrm{flow}}
+=\mathcal L_{\mathrm{MFI}}
++\beta_{\mathrm{cons}}\mathcal L_{\mathrm{cons}},
+\qquad
+\beta_{\mathrm{cons}}=\texttt{consistency\_alpha}.
+$$
+
+Use `--agent.consistency_alpha=0` to disable consistency. In
+`agents/am_meanflow_target_changed.py`, Q enters through the adjoint target by
+default; `--agent.meanflowql_direct_q_coef=0` disables the additional direct-Q
+actor gradient, while a positive value deliberately creates a hybrid
+ablation. Full derivations are in
+[docs/AM_MF_INTRODUCTION.md](docs/AM_MF_INTRODUCTION.md) and
+[docs/AM_MF_CHANGED_TARGET.md](docs/AM_MF_CHANGED_TARGET.md).
+
+## `small_scale_validation` run guide
+
+The small-scale validation uses two complementary tasks:
+
+| Task | Metric | MeanFlowQL paper result |
+| --- | --- | ---: |
+| `humanoidmaze-large-navigate-singletask-task1-v0` | success | offline C5: `53 +/- 5` |
+| `relocate-cloned-v1` | D4RL normalized return | C5: `1 +/- 1 -> 19 +/- 8` |
+
+The paper configuration for both tasks is `alpha=10000`,
+`num_candidates=5`, and `time_steps=50`. The paper does not report C1 values,
+and it does not report a task-specific online value for HumanoidMaze Large
+Task1; C1 and Humanoid online runs are diagnostics rather than paper numbers.
+
+Run from the repository root:
+
+```bash
+# MeanFlowQL paper-style baseline: offline and offline-to-online.
+bash scripts/small_scale_validation/run_humanoidmaze_large_task1.sh offline 1
+bash scripts/small_scale_validation/run_humanoidmaze_large_task1.sh online 1
+
+bash scripts/small_scale_validation/run_relocate_cloned.sh offline 1
+bash scripts/small_scale_validation/run_relocate_cloned.sh online 1
+```
+
+The scripts default to `agents/meanflowql.py`, C5, local W&B logging, and no
+early stopping. Change the strategy without editing either script by passing
+the agent path and its existing config names:
+
+```bash
+# AM embedded in the MeanFlowQL target; no extra direct-Q actor gradient.
+AGENT_PATH=agents/am_meanflow_target_changed.py \
+EXTRA_AGENT_FLAGS='--agent.adjoint_eta=0.1 --agent.consistency_alpha=0.1 --agent.meanflowql_direct_q_coef=0.0' \
+bash scripts/small_scale_validation/run_humanoidmaze_large_task1.sh offline 1
+
+# A C1 diagnostic. This changes the training/sampling protocol and is not a
+# paper-reported result.
+NUM_CANDIDATES=1 \
+bash scripts/small_scale_validation/run_relocate_cloned.sh offline 1
+```
+
+The important strategy parameters are:
+
+| Purpose | Parameter |
+| --- | --- |
+| Select implementation | `AGENT_PATH=agents/meanflowql.py`, `agents/native_meanflow.py`, `agents/am_meanflow.py`, or `agents/am_meanflow_target_changed.py` |
+| Adjoint strength | `--agent.adjoint_eta` |
+| Consistency weight | `--agent.consistency_alpha` |
+| Optional hybrid Direct-Q | `--agent.meanflowql_direct_q_coef` |
+| Candidate count C1/C5 | `NUM_CANDIDATES=1` or `5` / `--agent.num_candidates` |
+| Paper BC/MFI coefficient | `ALPHA` / `--agent.alpha` |
+| MeanFlowQL time grid | `TIME_STEPS` / `--agent.time_steps` |
+| Training budgets | `OFFLINE_STEPS` and `ONLINE_STEPS` |
+
+The scripts launch training only; no generated result is tracked by Git. See
+[docs/SMALL_SCALE_VALIDATION.md](docs/SMALL_SCALE_VALIDATION.md) for the D4RL
+budget note, exact defaults, all strategy parameter names, and the C1/C5
+interpretation.
 
 ## Native MeanFlow
 
