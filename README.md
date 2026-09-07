@@ -165,7 +165,8 @@ python -m pytest -q \
   tests/test_native_meanflow_agent.py \
   tests/test_am_meanflow.py \
   tests/test_am_meanflow_agent.py \
-  tests/test_am_meanflow_target_changed.py
+  tests/test_am_meanflow_target_changed.py \
+  tests/test_consistency_eval.py
 ```
 
 ### Original AM-MF target smoke run
@@ -220,6 +221,48 @@ AlphaFlow mixture. The changed version's inherited `alpha` is MeanFlowQL's
 MFI/BC coefficient; its AM strength is `adjoint_eta`. Direct-Q is disabled in
 the changed version by default because Q already enters through the adjoint;
 setting `meanflowql_direct_q_coef>0` creates an explicit hybrid ablation.
+
+## Consistency evaluation
+
+The repository includes one consistency evaluator for Native MeanFlow,
+MeanFlowQL, and both AM-MF variants:
+
+```text
+consistency_eval.py
+utils/consistency_eval.py
+tests/test_consistency_eval.py
+docs/CONSISTENCY_EVAL.md
+```
+
+It keeps the two parameterizations separate. Native MeanFlow agents are
+checked with the interval split identity, endpoint-map consistency, and
+endpoint Jacobian/JVP consistency. MeanFlowQL agents are checked through their
+actual reformulated endpoint map, without inventing an unavailable native
+interval velocity. K1-vs-KN errors and trajectory geometry are reported for
+both families.
+
+Run the evaluator from the repository root:
+
+```bash
+MUJOCO_GL=egl python consistency_eval.py \
+  --run_dir=/absolute/path/to/run \
+  --restore_epoch=1000000 \
+  --validation_states=1024 \
+  --noises_per_state=4 \
+  --eval_seed=20260824 \
+  --eval_nfes=1,2,4,10 \
+  --trajectory_steps=10 \
+  --inference_batch_size=256 \
+  --jacobian_probe_pairs=128
+```
+
+The command restores the agent configuration and normalization protocol from
+the run's `flags.json`, evaluates fixed state-noise pairs, and writes a JSON
+report into the run directory. Optional `--max_*` arguments enable an explicit
+binary judgement. No task-independent pass/fail thresholds are assumed.
+
+See [docs/CONSISTENCY_EVAL.md](docs/CONSISTENCY_EVAL.md) for the formulas,
+metric definitions, shared-probe protocol, thresholds, and comparison matrix.
 
 ## Toy Experiments
 
