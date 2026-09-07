@@ -122,6 +122,105 @@ The original MeanFlowQL files and checkpoint structure are unchanged. Native
 MeanFlow actor checkpoints are not interchangeable with original MeanFlowQL
 actor checkpoints.
 
+## AM-MF on Native MeanFlow
+
+Two isolated AM-MF versions are provided. The first keeps the original AM/Note
+target on the Native MeanFlow actor. The second adapts AM to this repository's
+existing MeanFlowQL reformulation and injects the endpoint-Q adjoint into the
+reformulated direct-map target.
+
+| Version | Agent | Target |
+| --- | --- | --- |
+| Original AM-MF target | `agents/am_meanflow.py` | `u_pre + eta*(t-s)*lambda`, followed by the AlphaFlow mixture |
+| AM-guided MeanFlowQL target | `agents/am_meanflow_target_changed.py` | `g_tgt=x_t+(t-1)v_AM-t D_t^[v_AM]g`, where `v_AM=v-eta*t*lambda` |
+
+The changed version subclasses `MeanFlowQL_Agent`, keeps its three-input direct
+map `g(o,x_t,t)` and one-step sampler `g(o,epsilon,1)`, and exactly recovers the
+original MeanFlowQL target when `adjoint_eta=0`. It is neither a Native JVP
+variant nor the earlier `u_pre+eta*lambda` interval-scaling ablation.
+
+Implementation and tests:
+
+```text
+agents/am_meanflow.py
+agents/am_meanflow_target_changed.py
+utils/am_meanflow.py
+tests/test_am_meanflow.py
+tests/test_am_meanflow_agent.py
+tests/test_am_meanflow_target_changed.py
+```
+
+The shared principles and paired-comparison protocol are in
+[docs/AM_MF_INTRODUCTION.md](docs/AM_MF_INTRODUCTION.md). The two targets have
+separate documentation:
+
+- [Original AM-MF target](docs/AM_MF_ORIGINAL_TARGET.md)
+- [AM-guided MeanFlowQL reformulated target](docs/AM_MF_CHANGED_TARGET.md)
+
+### Run AM-MF and Native regression tests
+
+```bash
+python -m pytest -q \
+  tests/test_native_meanflow.py \
+  tests/test_native_meanflow_agent.py \
+  tests/test_am_meanflow.py \
+  tests/test_am_meanflow_agent.py \
+  tests/test_am_meanflow_target_changed.py
+```
+
+### Original AM-MF target smoke run
+
+```bash
+MUJOCO_GL=egl python main_meanflowql.py \
+  --run_group=am_mf_original_target_smoke \
+  --env_name=cube-triple-play-singletask-task2-v0 \
+  --agent=agents/am_meanflow.py \
+  --seed=0 \
+  --offline_steps=20 \
+  --online_steps=0 \
+  --pretrain_factor=0.5 \
+  --log_interval=5 \
+  --eval_interval=0 \
+  --save_interval=20 \
+  --enable_early_stopping=False \
+  --wandb_online=False \
+  --agent.batch_size=32 \
+  --agent.alpha_mode=fixed \
+  --agent.alpha_value=0.5 \
+  --agent.num_candidates=1
+```
+
+### AM-guided MeanFlowQL target smoke run
+
+```bash
+MUJOCO_GL=egl python main_meanflowql.py \
+  --run_group=am_meanflowql_reformulated_smoke \
+  --env_name=cube-triple-play-singletask-task2-v0 \
+  --agent=agents/am_meanflow_target_changed.py \
+  --seed=0 \
+  --offline_steps=20 \
+  --online_steps=0 \
+  --pretrain_factor=0.5 \
+  --log_interval=5 \
+  --eval_interval=0 \
+  --save_interval=20 \
+  --enable_early_stopping=False \
+  --wandb_online=False \
+  --agent.batch_size=32 \
+  --agent.adjoint_eta=0.1 \
+  --agent.meanflowql_direct_q_coef=0.0 \
+  --agent.num_candidates=1 \
+  --agent.action_mode=normal
+```
+
+Each agent fixes its own target contract: `am_meanflow.py` accepts only
+`note_average`, while `am_meanflow_target_changed.py` accepts only
+`meanflowql_reformulated_adjoint`. The original version's `alpha` controls the
+AlphaFlow mixture. The changed version's inherited `alpha` is MeanFlowQL's
+MFI/BC coefficient; its AM strength is `adjoint_eta`. Direct-Q is disabled in
+the changed version by default because Q already enters through the adjoint;
+setting `meanflowql_direct_q_coef>0` creates an explicit hybrid ablation.
+
 ## Toy Experiments
 
 ```bash
