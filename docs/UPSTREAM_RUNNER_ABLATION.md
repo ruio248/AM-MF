@@ -35,3 +35,13 @@ python -m unittest tests.test_upstream_integrity
 Additional deterministic evaluation or diagnostics must be performed after
 training and reported separately; they are not part of the upstream-faithful
 training trajectory.
+
+On an eight-GPU host, seeds 1--4 start immediately and seed 5 is queued behind
+seed 1 on GPUs 0 and 1:
+
+```bash
+bash scripts/launch_upstream_relocate_5seeds.sh
+```
+
+This file only schedules shell commands. Each child still invokes
+`run_upstream_relocate.sh`, which in turn invokes the original Python main.
