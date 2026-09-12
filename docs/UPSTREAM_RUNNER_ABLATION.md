@@ -1,0 +1,37 @@
+# B0/N upstream-runner ablation
+
+This experiment freezes the imported MeanFlowQL execution path at local commit
+`ce953a8` (upstream `3fab100`).  The formal B0 and N runs both execute the
+unchanged `main_meanflowql.py`, `utils/evaluation.py`, `utils/datasets.py`, and
+`envs/env_utils.py`.
+
+The only method switch is the agent configuration:
+
+- B0: `agents/meanflowql.py`.
+- N: `agents/am_meanflow_note.py`.
+
+N contains behavior warmup, prior freezing, EMA, interval transport, endpoint
+adjoint control, and Jacobian matching inside its `update()` implementation. It
+implements the original runner's `create`, `update`, and `sample_actions`
+interface. There is no task-specific Python trainer and no replacement evaluator.
+
+The formal Relocate command is wrapped only for repeatability:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 bash scripts/run_upstream_relocate.sh b0 1 /path/to/results/b0_seed1
+CUDA_VISIBLE_DEVICES=1 bash scripts/run_upstream_relocate.sh n 1 /path/to/results/n_seed1
+```
+
+Both commands preserve the upstream replay construction, padded-array
+normalization, global NumPy sampling, sequential online JAX RNG, unseeded reset,
+evaluation timing, and evaluator behavior.  No historical checkpoint is loaded.
+
+The integrity test must pass before the launcher starts training:
+
+```bash
+python -m unittest tests.test_upstream_integrity
+```
+
+Additional deterministic evaluation or diagnostics must be performed after
+training and reported separately; they are not part of the upstream-faithful
+training trajectory.
