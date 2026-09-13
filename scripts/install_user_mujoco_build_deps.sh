@@ -7,8 +7,9 @@ set -euo pipefail
 prefix="${AM_MF_MUJOCO_BUILD_DEPS:-$HOME/.local/am-mf-mujoco-build-deps}"
 header="$prefix/usr/include/GL/osmesa.h"
 runtime="$prefix/usr/lib/x86_64-linux-gnu/libOSMesa.so.8"
+gl_runtime="$prefix/usr/lib/x86_64-linux-gnu/libGL.so.1"
 
-if [[ -f "$header" && -e "$runtime" ]]; then
+if [[ -f "$header" && -e "$runtime" && -e "$gl_runtime" ]]; then
   echo "User-local MuJoCo build dependencies already available at $prefix"
   exit 0
 fi
@@ -34,7 +35,7 @@ trap cleanup EXIT
   # Together these provide GL/osmesa.h, GL/gl.h, the OSMesa runtime, and the
   # link-time symlinks on Ubuntu 22.04.  Extracting into the prefix avoids
   # changing the host package database or requiring administrator access.
-  apt-get download libosmesa6 libosmesa6-dev libgl-dev libglx-dev mesa-common-dev
+  apt-get download libosmesa6 libosmesa6-dev libgl1 libglx0 libgl-dev libglx-dev mesa-common-dev
   for deb in ./*.deb; do
     dpkg-deb -x "$deb" "$prefix"
   done
@@ -42,4 +43,5 @@ trap cleanup EXIT
 
 test -f "$header"
 test -e "$runtime"
+test -e "$gl_runtime"
 echo "Installed user-local MuJoCo build dependencies at $prefix"
