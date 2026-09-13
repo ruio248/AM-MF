@@ -1,3 +1,4 @@
+import csv
 import os
 import tempfile
 from datetime import datetime
@@ -17,20 +18,51 @@ class CsvLogger:
         self.path = path
         self.header = None
         self.file = None
+        self.writer = None
+        self.rows = []
         self.disallowed_types = (wandb.Image, wandb.Video, wandb.Histogram)
 
     def log(self, row, step):
+        """Append a scalar log row, expanding the CSV schema when needed.
+
+        Some agents enter a new training phase after warm-up and expose
+        additional diagnostics there (for example, the Note-adjoint transport
+        and Jacobian terms).  The original logger fixed its schema on the
+        first, pre-warm-up row, silently dropping those later fields.  Logging
+        is not part of the optimization protocol, so retain all fields while
+        keeping a valid CSV artifact for every checkpointed training run.
+        """
+        row = dict(row)
         row['step'] = step
+        filtered_row = {
+            k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)
+        }
+
         if self.file is None:
-            self.file = open(self.path, 'w')
-            if self.header is None:
-                self.header = [k for k, v in row.items() if not isinstance(v, self.disallowed_types)]
-                self.file.write(','.join(self.header) + '\n')
-            filtered_row = {k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)}
-            self.file.write(','.join([str(filtered_row.get(k, '')) for k in self.header]) + '\n')
+            self.header = list(filtered_row)
+            self.file = open(self.path, 'w', newline='')
+            self.writer = csv.DictWriter(self.file, fieldnames=self.header)
+            self.writer.writeheader()
+
+        new_keys = [key for key in filtered_row if key not in self.header]
+        self.rows.append(filtered_row)
+        if new_keys:
+            # A new diagnostic appeared after the first row.  Rewrite the
+            # small metric table atomically with the extended schema, rather
+            # than silently discarding it.  Training metric tables have one
+            # row per log interval, not one per gradient update.
+            self.header.extend(new_keys)
+            self.file.close()
+            temp_path = f'{self.path}.tmp'
+            with open(temp_path, 'w', newline='') as temp_file:
+                writer = csv.DictWriter(temp_file, fieldnames=self.header)
+                writer.writeheader()
+                writer.writerows(self.rows)
+            os.replace(temp_path, self.path)
+            self.file = open(self.path, 'a', newline='')
+            self.writer = csv.DictWriter(self.file, fieldnames=self.header)
         else:
-            filtered_row = {k: v for k, v in row.items() if not isinstance(v, self.disallowed_types)}
-            self.file.write(','.join([str(filtered_row.get(k, '')) for k in self.header]) + '\n')
+            self.writer.writerow(filtered_row)
         self.file.flush()
 
     def close(self):

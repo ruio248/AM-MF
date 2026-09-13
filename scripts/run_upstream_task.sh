@@ -52,6 +52,7 @@ eval_interval="${AM_MF_EVAL_INTERVAL:-100000}"
 eval_episodes="${AM_MF_EVAL_EPISODES:-50}"
 save_interval="${AM_MF_SAVE_INTERVAL:-1000000}"
 buffer_size="${AM_MF_BUFFER_SIZE:-2000000}"
+log_interval="${AM_MF_LOG_INTERVAL:-5000}"
 run_group="${arm}_${task_profile}_seed${seed}"
 # The formal N protocol uses the agent default (500k updates).  A short smoke
 # run can lower this *only* through an explicit environment override so that
@@ -76,6 +77,7 @@ mkdir -p "$output_root"
   printf 'discount=%s\n' "$discount"
   printf 'time_steps=%s\n' "$time_steps"
   printf 'num_candidates=5\n'
+  printf 'log_interval=%s\n' "$log_interval"
   printf 'early_stopping=false\n'
   if [[ "$arm" == "n" ]]; then
     printf 'behavior_warmup_updates=%s\n' "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-500000}"
@@ -102,6 +104,7 @@ exec bash "$project_root/scripts/experiment_env.sh" main_meanflowql.py \
   --use_observation_normalization=True \
   --eval_episodes="$eval_episodes" \
   --eval_interval="$eval_interval" \
+  --log_interval="$log_interval" \
   --save_interval="$save_interval" \
   --video_episodes=0 \
   --enable_early_stopping=False \
