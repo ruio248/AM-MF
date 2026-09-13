@@ -53,6 +53,14 @@ eval_episodes="${AM_MF_EVAL_EPISODES:-50}"
 save_interval="${AM_MF_SAVE_INTERVAL:-1000000}"
 buffer_size="${AM_MF_BUFFER_SIZE:-2000000}"
 run_group="${arm}_${task_profile}_seed${seed}"
+# The formal N protocol uses the agent default (500k updates).  A short smoke
+# run can lower this *only* through an explicit environment override so that
+# the actual adjoint-control branch, rather than just behavior initialization,
+# is exercised before formal jobs are launched.
+agent_extra_flags=()
+if [[ "$arm" == "n" && -n "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-}" ]]; then
+  agent_extra_flags+=("--agent.behavior_warmup_updates=${AM_MF_BEHAVIOR_WARMUP_UPDATES}")
+fi
 
 mkdir -p "$output_root"
 {
@@ -69,6 +77,9 @@ mkdir -p "$output_root"
   printf 'time_steps=%s\n' "$time_steps"
   printf 'num_candidates=5\n'
   printf 'early_stopping=false\n'
+  if [[ "$arm" == "n" ]]; then
+    printf 'behavior_warmup_updates=%s\n' "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-500000}"
+  fi
 } > "$output_root/launch_manifest.txt"
 
 bash "$project_root/scripts/experiment_env.sh" -m unittest tests.test_upstream_integrity
@@ -81,6 +92,7 @@ exec bash "$project_root/scripts/experiment_env.sh" main_meanflowql.py \
   --agent.discount="$discount" \
   --agent.num_candidates=5 \
   --agent.consistency_alpha=0 \
+  "${agent_extra_flags[@]}" \
   --seed="$seed" \
   --offline_steps="$offline_steps" \
   --online_steps="$online_steps" \
