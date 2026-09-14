@@ -6,6 +6,32 @@
   <img src="./toy_example/teaser.png" width="65%">
 </p>
 
+## V2: N algorithm and upstream-faithful evaluation
+
+This repository's **V2** release contains the clean implementation of the N
+adjoint-matching method and a reproducible B0/N experiment path that retains
+the original MeanFlowQL training main and evaluator. The method performs
+prior-constrained local velocity control using the endpoint-Q adjoint, then
+integrates one controlled path and distills consistent interval-average
+velocity targets from it.
+
+The complete method definition, exact Relocate command, final three-seed
+result, and the limits of the comparison are documented in
+[`docs/V2_UPSTREAM_RESULTS.md`](docs/V2_UPSTREAM_RESULTS.md). In particular,
+the reported result is a same-upstream-path B0/N comparison; it is not yet a
+paper-level Relocate replication or a QAM-FQL protocol-aligned comparison.
+
+To start a V2 Relocate seed, use the thin upstream launcher rather than a
+task-specific trainer:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 bash scripts/run_upstream_task.sh \
+  n relocate_cloned 1 /path/to/results/n_seed1
+```
+
+The launcher runs the frozen-upstream integrity test before training. Dataset,
+checkpoint, and W&B artifacts are intentionally external to Git.
+
 
 
 ## Setup

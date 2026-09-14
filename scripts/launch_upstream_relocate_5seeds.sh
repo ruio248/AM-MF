@@ -27,7 +27,7 @@ export MKL_NUM_THREADS=1
 export MUJOCO_PY_MUJOCO_PATH="${MUJOCO_PY_MUJOCO_PATH:-$HOME/.mujoco/mujoco210}"
 export LD_LIBRARY_PATH="$MUJOCO_PY_MUJOCO_PATH/bin:$HOME/.local/am-mf-mujoco-build-deps/usr/lib/x86_64-linux-gnu:/usr/lib/nvidia${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-python -m unittest tests.test_upstream_integrity
+python -m unittest discover -s tests -p 'test_upstream_integrity.py'
 
 if pgrep -f "$project_root.*main_meanflowql.py" >/dev/null; then
   echo "A formal run from this source tree is already active." >&2

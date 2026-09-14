@@ -29,15 +29,19 @@ evaluation timing, and evaluator behavior.  No historical checkpoint is loaded.
 The integrity test must pass before the launcher starts training:
 
 ```bash
-python -m unittest tests.test_upstream_integrity
+python -m unittest discover -s tests -p 'test_upstream_integrity.py'
 ```
 
 Additional deterministic evaluation or diagnostics must be performed after
 training and reported separately; they are not part of the upstream-faithful
 training trajectory.
 
-On an eight-GPU host, seeds 1--4 start immediately and seed 5 is queued behind
-seed 1 on GPUs 0 and 1:
+`launch_upstream_relocate_5seeds.sh` is a historical five-seed convenience
+scheduler. The completed V2 Relocate protocol uses seeds 1--3; its exact
+configuration, aggregate result, and reporting boundary are in
+[`V2_UPSTREAM_RESULTS.md`](V2_UPSTREAM_RESULTS.md). If the historical scheduler
+is used on an eight-GPU host, seeds 1--4 start immediately and seed 5 is queued
+behind seed 1 on GPUs 0 and 1:
 
 ```bash
 bash scripts/launch_upstream_relocate_5seeds.sh

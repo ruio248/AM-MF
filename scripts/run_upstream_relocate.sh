@@ -26,7 +26,7 @@ case "$arm" in
     ;;
 esac
 
-python -m unittest tests.test_upstream_integrity
+python -m unittest discover -s tests -p 'test_upstream_integrity.py'
 
 exec python main_meanflowql.py \
   --env_name=relocate-cloned-v1 \

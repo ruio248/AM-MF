@@ -84,7 +84,7 @@ mkdir -p "$output_root"
   fi
 } > "$output_root/launch_manifest.txt"
 
-bash "$project_root/scripts/experiment_env.sh" -m unittest tests.test_upstream_integrity
+bash "$project_root/scripts/experiment_env.sh" -m unittest discover -s tests -p 'test_upstream_integrity.py'
 
 exec bash "$project_root/scripts/experiment_env.sh" main_meanflowql.py \
   --env_name="$env_name" \
