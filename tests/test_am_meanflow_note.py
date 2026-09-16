@@ -167,6 +167,28 @@ class NoteAgentTest(unittest.TestCase):
         self.assertEqual(int(jnp.sum(r == t)), 4)
         self.assertTrue(np.all(np.isfinite(velocity)))
 
+    def test_gated_control_schedule_and_terms_are_bounded(self):
+        config = flax.core.unfreeze(self.warm.config)
+        config["control_eta_ramp_updates"] = 10
+        config["control_adjoint_clip"] = 0.05
+        config["control_uncertainty_scale"] = 0.25
+        controlled = self.warm.replace(config=config)
+        self.assertAlmostEqual(float(controlled.scheduled_control_eta(3)), 0.0)
+        self.assertAlmostEqual(float(controlled.scheduled_control_eta(8)), 0.05)
+        self.assertAlmostEqual(float(controlled.scheduled_control_eta(13)), 0.1)
+        noise = jnp.zeros((2, 2))
+        time = jnp.ones((2, 1))
+        _, gate, info = controlled.control_terms(
+            self.batch["observations"][:2], noise, time
+        )
+        self.assertTrue(np.all(np.isfinite(gate)))
+        self.assertTrue(np.all((np.asarray(gate) > 0) & (np.asarray(gate) <= 1)))
+        self.assertLessEqual(float(jnp.max(info["clipped_norm"])), 0.050001)
+        updated, update_info = controlled.update(self.batch, 8)
+        self.assertEqual(int(updated.completed_updates), 4)
+        self.assertAlmostEqual(float(update_info["control/eta"]), 0.05)
+        self.assertTrue(np.isfinite(float(update_info["control/gate"])))
+
 
 if __name__ == "__main__":
     unittest.main()

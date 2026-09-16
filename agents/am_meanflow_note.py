@@ -64,8 +64,9 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
             raise ValueError("Unknown Note variant")
         if config["encoder"] is not None or config["consistency_alpha"] != 0:
             raise ValueError("Note v1 supports vector observations and consistency_alpha=0")
+        if config["behavior_warmup_updates"] < 0 or config["control_eta_ramp_updates"] < 0:
+            raise ValueError("warmup and control-ramp updates must be nonnegative")
         for key in (
-            "behavior_warmup_updates",
             "teacher_steps",
             "teacher_batch_size",
             "jacobian_interval",
@@ -75,7 +76,13 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
                 raise ValueError(f"{key} must be positive")
         if config["teacher_solver"] != "midpoint_rk2" or config["jacobian_fd_eps"] <= 0:
             raise ValueError("Invalid teacher or finite-difference configuration")
-        if min(config["control_eta"], config["jacobian_coef"], config["transport_coef"]) < 0:
+        if min(
+            config["control_eta"],
+            config["control_adjoint_clip"],
+            config["control_uncertainty_scale"],
+            config["jacobian_coef"],
+            config["transport_coef"],
+        ) < 0:
             raise ValueError("Loss/control coefficients must be nonnegative")
         if not 0 < config["target_actor_tau"] <= 1:
             raise ValueError("Invalid EMA coefficient")
@@ -171,18 +178,69 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
             x,
         )
 
-    def teacher_field(self, observations, x, t):
+    def scheduled_control_eta(self, current_step):
+        """Ramp the AM control after behavior initialization when requested."""
+        ramp_updates = self.config["control_eta_ramp_updates"]
+        if ramp_updates == 0:
+            return jnp.asarray(self.config["control_eta"])
+        guided_updates = jnp.maximum(
+            jnp.asarray(current_step) - self.config["behavior_warmup_updates"], 0
+        )
+        ramp = jnp.minimum(guided_updates / ramp_updates, 1.0)
+        return jnp.asarray(self.config["control_eta"]) * ramp
+
+    def control_terms(self, observations, x, t):
+        """Return a clipped, uncertainty-gated endpoint-Q adjoint.
+
+        The gate is based on the relative disagreement of the two target
+        critics at the endpoint. A zero scale disables it exactly, which
+        preserves the original N behavior for all existing experiments.
+        """
+        endpoint, adjoint = self.adjoint(observations, x, t)
+        raw_norm = jnp.linalg.norm(adjoint, axis=-1)
+        clip = self.config["control_adjoint_clip"]
+        if clip == 0:
+            clip_scale = jnp.ones_like(raw_norm)
+        else:
+            clip_scale = jnp.minimum(1.0, clip / jnp.maximum(raw_norm, 1e-8))
+        clipped_adjoint = adjoint * clip_scale[:, None]
+
+        q_values = self.network.select("target_critic")(
+            observations, actions=jnp.clip(endpoint, -1, 1)
+        )
+        q_mean = jnp.mean(q_values, axis=0)
+        q_std = jnp.std(q_values, axis=0)
+        relative_disagreement = q_std / jnp.maximum(jnp.abs(q_mean), 1.0)
+        uncertainty_scale = self.config["control_uncertainty_scale"]
+        if uncertainty_scale == 0:
+            gate = jnp.ones_like(relative_disagreement)
+        else:
+            gate = 1.0 / (1.0 + relative_disagreement / uncertainty_scale)
+        return clipped_adjoint, gate, {
+            "raw_norm": raw_norm,
+            "clipped_norm": jnp.linalg.norm(clipped_adjoint, axis=-1),
+            "gate": gate,
+            "relative_disagreement": relative_disagreement,
+            "clipped_fraction": 1.0 - clip_scale,
+        }
+
+    def teacher_field(self, observations, x, t, control_eta=None):
         prior = x - self.g(
             observations, x, t, t, snapshot=self.pre_actor_params
         )
         if self.config["variant"] == "direct_q_control" or self.config["control_eta"] == 0:
             return prior
-        _, adjoint = self.adjoint(observations, x, t)
-        return controlled_velocity(prior, adjoint, self.config["control_eta"])
+        eta = (
+            jnp.asarray(self.config["control_eta"])
+            if control_eta is None
+            else control_eta
+        )
+        adjoint, gate, _ = self.control_terms(observations, x, t)
+        return controlled_velocity(prior, gate[:, None] * adjoint, eta)
 
-    def teacher_path(self, observations, noise, steps=None):
+    def teacher_path(self, observations, noise, steps=None, control_eta=None):
         return rk2_path(
-            lambda x, t: self.teacher_field(observations, x, t),
+            lambda x, t: self.teacher_field(observations, x, t, control_eta),
             noise,
             steps=self.config["teacher_steps"] if steps is None else steps,
         )
@@ -241,14 +299,14 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
             "q_loss": jnp.asarray(0.0),
         }
 
-    def transport_batch(self, observations, rng):
+    def transport_batch(self, observations, rng, control_eta=None):
         noise_key, diagonal_key, pair_key = jax.random.split(rng, 3)
         count = min(self.config["teacher_batch_size"], len(observations))
         obs = observations[:count]
         noise = self.sample_noise(
             noise_key, (count, self.config["action_dim"])
         )
-        path = self.teacher_path(obs, noise)
+        path = self.teacher_path(obs, noise, control_eta=control_eta)
         steps = self.config["teacher_steps"]
         diagonal = jax.random.randint(diagonal_key, (count, 2), 0, steps + 1)
         starts, ends = jnp.triu_indices(steps + 1, k=1)
@@ -279,7 +337,7 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
         diagonal_x = path[diagonal, rows].reshape(-1, self.config["action_dim"])
         diagonal_t = (1 - diagonal / steps).reshape(-1, 1)
         diagonal_velocity = self.teacher_field(
-            diagonal_obs, diagonal_x, diagonal_t
+            diagonal_obs, diagonal_x, diagonal_t, control_eta
         ).reshape(count, 2, -1)
         average = average.at[:, 1:3].set(diagonal_velocity)
         data = (
@@ -291,13 +349,13 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
         )
         return jax.tree_util.tree_map(jax.lax.stop_gradient, data), noise, path
 
-    def jacobian_loss(self, observations, noise, grad_params, rng):
+    def jacobian_loss(self, observations, noise, grad_params, rng, control_eta=None):
         count = min(self.config["jacobian_batch_size"], len(noise))
         obs = observations[:count]
         index_key, direction_key = jax.random.split(rng)
         steps = self.config["teacher_steps"]
         indices = jax.random.randint(index_key, (count,), 0, steps).at[0].set(0)
-        path = self.teacher_path(obs, noise[:count])
+        path = self.teacher_path(obs, noise[:count], control_eta=control_eta)
         x = jax.lax.stop_gradient(path[indices, jnp.arange(count)])
         t = (1 - indices / steps)[:, None]
         direction = jax.random.rademacher(direction_key, x.shape, dtype=x.dtype)
@@ -312,7 +370,7 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
         )
         teacher = directional_difference(
             lambda z: rk2_endpoint_from_grid(
-                lambda state, time: self.teacher_field(obs, state, time),
+                lambda state, time: self.teacher_field(obs, state, time, control_eta),
                 z,
                 indices,
                 steps,
@@ -323,16 +381,18 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
         )
         return jnp.mean((student - jax.lax.stop_gradient(teacher)) ** 2)
 
-    def guided_actor_loss(self, batch, grad_params, rng, jacobian_active):
+    def guided_actor_loss(
+        self, batch, grad_params, rng, jacobian_active, control_eta=None
+    ):
         transport_key, jacobian_key, bound_key = jax.random.split(rng, 3)
         (obs, x, r, t, target), noise, path = self.transport_batch(
-            batch["observations"], transport_key
+            batch["observations"], transport_key, control_eta
         )
         prediction = x - self.g(obs, x, r, t, params=grad_params)
         transport = jnp.mean((prediction - target) ** 2)
         jacobian = (
             self.jacobian_loss(
-                batch["observations"], noise, grad_params, jacobian_key
+                batch["observations"], noise, grad_params, jacobian_key, control_eta
             )
             if jacobian_active
             else jnp.asarray(0.0)
@@ -370,6 +430,15 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
         teacher_q = self.target_reward(
             batch["observations"][: len(noise)], path[-1]
         ).mean()
+        diagnostic_t = jnp.ones((len(noise), 1))
+        _, _, control_info = self.control_terms(
+            batch["observations"][: len(noise)], noise, diagnostic_t
+        )
+        eta = (
+            jnp.asarray(self.config["control_eta"])
+            if control_eta is None
+            else control_eta
+        )
         info = {
             "actor/loss": loss,
             "actor/transport": transport,
@@ -379,6 +448,14 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
             "actor/q": q,
             "teacher/q": teacher_q,
             "teacher/endpoint_variance": jnp.var(path[-1], axis=0).mean(),
+            "control/eta": eta,
+            "control/gate": jnp.mean(control_info["gate"]),
+            "control/adjoint_norm": jnp.mean(control_info["raw_norm"]),
+            "control/applied_adjoint_norm": jnp.mean(control_info["clipped_norm"]),
+            "control/adjoint_clip_fraction": jnp.mean(control_info["clipped_fraction"]),
+            "control/relative_critic_disagreement": jnp.mean(
+                control_info["relative_disagreement"]
+            ),
         }
         info.update(
             {f"actor/{key}": value for key, value in clipping_metrics(raw).items()}
@@ -392,8 +469,9 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
 
         def loss_fn(params):
             critic, critic_info = self.critic_loss(batch, params, critic_rng)
+            control_eta = self.scheduled_control_eta(current_step)
             actor, actor_info = self.guided_actor_loss(
-                batch, params, actor_rng, jacobian_active
+                batch, params, actor_rng, jacobian_active, control_eta
             )
             info = {f"critic/{key}": value for key, value in critic_info.items()}
             info.update(actor_info)
@@ -449,6 +527,9 @@ def get_config():
             variant="note_adjoint",
             behavior_warmup_updates=500000,
             control_eta=0.1,
+            control_eta_ramp_updates=0,
+            control_adjoint_clip=0.0,
+            control_uncertainty_scale=0.0,
             teacher_steps=8,
             teacher_solver="midpoint_rk2",
             teacher_batch_size=32,

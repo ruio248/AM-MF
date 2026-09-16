@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
-  echo "usage: $0 {b0|n} {humanoid_large_task1|relocate_cloned} SEED OUTPUT_ROOT" >&2
+  echo "usage: $0 {b0|n|n_offline_gated} {humanoid_large_task1|relocate_cloned} SEED OUTPUT_ROOT" >&2
   exit 2
 fi
 
@@ -16,9 +16,9 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 case "$arm" in
   b0) agent="agents/meanflowql.py" ;;
-  n) agent="agents/am_meanflow_note.py" ;;
+  n|n_offline_gated) agent="agents/am_meanflow_note.py" ;;
   *)
-    echo "arm must be b0 or n" >&2
+    echo "arm must be b0, n, or n_offline_gated" >&2
     exit 2
     ;;
 esac
@@ -59,8 +59,17 @@ run_group="${arm}_${task_profile}_seed${seed}"
 # the actual adjoint-control branch, rather than just behavior initialization,
 # is exercised before formal jobs are launched.
 agent_extra_flags=()
-if [[ "$arm" == "n" && -n "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-}" ]]; then
+if [[ ( "$arm" == "n" || "$arm" == "n_offline_gated" ) && -n "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-}" ]]; then
   agent_extra_flags+=("--agent.behavior_warmup_updates=${AM_MF_BEHAVIOR_WARMUP_UPDATES}")
+fi
+if [[ "$arm" == "n_offline_gated" ]]; then
+  # Conservative offline-AM ablation. The original N default remains exact
+  # unless this explicitly selected arm is used.
+  agent_extra_flags+=(
+    "--agent.control_eta_ramp_updates=${AM_MF_CONTROL_ETA_RAMP_UPDATES:-500000}"
+    "--agent.control_adjoint_clip=${AM_MF_CONTROL_ADJOINT_CLIP:-1.0}"
+    "--agent.control_uncertainty_scale=${AM_MF_CONTROL_UNCERTAINTY_SCALE:-0.25}"
+  )
 fi
 
 mkdir -p "$output_root"
@@ -79,8 +88,13 @@ mkdir -p "$output_root"
   printf 'num_candidates=5\n'
   printf 'log_interval=%s\n' "$log_interval"
   printf 'early_stopping=false\n'
-  if [[ "$arm" == "n" ]]; then
+  if [[ "$arm" == "n" || "$arm" == "n_offline_gated" ]]; then
     printf 'behavior_warmup_updates=%s\n' "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-500000}"
+  fi
+  if [[ "$arm" == "n_offline_gated" ]]; then
+    printf 'control_eta_ramp_updates=%s\n' "${AM_MF_CONTROL_ETA_RAMP_UPDATES:-500000}"
+    printf 'control_adjoint_clip=%s\n' "${AM_MF_CONTROL_ADJOINT_CLIP:-1.0}"
+    printf 'control_uncertainty_scale=%s\n' "${AM_MF_CONTROL_UNCERTAINTY_SCALE:-0.25}"
   fi
 } > "$output_root/launch_manifest.txt"
 
