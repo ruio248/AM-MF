@@ -69,6 +69,7 @@ if [[ "$arm" == "n_offline_gated" ]]; then
     "--agent.control_eta_ramp_updates=${AM_MF_CONTROL_ETA_RAMP_UPDATES:-500000}"
     "--agent.control_adjoint_clip=${AM_MF_CONTROL_ADJOINT_CLIP:-1.0}"
     "--agent.control_uncertainty_scale=${AM_MF_CONTROL_UNCERTAINTY_SCALE:-0.25}"
+    "--agent.control_uncertainty_end_update=${AM_MF_CONTROL_UNCERTAINTY_END_UPDATE:-$offline_steps}"
   )
 fi
 
@@ -95,6 +96,7 @@ mkdir -p "$output_root"
     printf 'control_eta_ramp_updates=%s\n' "${AM_MF_CONTROL_ETA_RAMP_UPDATES:-500000}"
     printf 'control_adjoint_clip=%s\n' "${AM_MF_CONTROL_ADJOINT_CLIP:-1.0}"
     printf 'control_uncertainty_scale=%s\n' "${AM_MF_CONTROL_UNCERTAINTY_SCALE:-0.25}"
+    printf 'control_uncertainty_end_update=%s\n' "${AM_MF_CONTROL_UNCERTAINTY_END_UPDATE:-$offline_steps}"
   fi
 } > "$output_root/launch_manifest.txt"
 

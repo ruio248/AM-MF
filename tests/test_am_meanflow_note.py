@@ -172,10 +172,17 @@ class NoteAgentTest(unittest.TestCase):
         config["control_eta_ramp_updates"] = 10
         config["control_adjoint_clip"] = 0.05
         config["control_uncertainty_scale"] = 0.25
+        config["control_uncertainty_end_update"] = 8
         controlled = self.warm.replace(config=config)
         self.assertAlmostEqual(float(controlled.scheduled_control_eta(3)), 0.0)
         self.assertAlmostEqual(float(controlled.scheduled_control_eta(8)), 0.05)
         self.assertAlmostEqual(float(controlled.scheduled_control_eta(13)), 0.1)
+        self.assertAlmostEqual(
+            float(controlled.scheduled_uncertainty_scale(7)), 0.25
+        )
+        self.assertAlmostEqual(
+            float(controlled.scheduled_uncertainty_scale(8)), 0.0
+        )
         noise = jnp.zeros((2, 2))
         time = jnp.ones((2, 1))
         _, gate, info = controlled.control_terms(
