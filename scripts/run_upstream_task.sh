@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
-  echo "usage: $0 {b0|n|n_offline_gated|n_path_local} {humanoid_large_task1|relocate_cloned|pen_cloned_v1|hammer_cloned_v1} SEED OUTPUT_ROOT" >&2
+  echo "usage: $0 {b0|n|n_offline_gated|n_path_local} {humanoid_large_task1|humanoid_large_task1_paper|relocate_cloned|pen_cloned_v1|hammer_cloned_v1|door_cloned_v1|antmaze_umaze_v2|antmaze_umaze_diverse_v2|antmaze_medium_play_v2|antmaze_medium_diverse_v2|antmaze_large_play_v2|humanoidmaze_medium_task1|cube_double_play_task2} SEED OUTPUT_ROOT" >&2
   exit 2
 fi
 
@@ -27,6 +27,19 @@ case "$task_profile" in
   humanoid_large_task1)
     env_name="humanoidmaze-large-navigate-singletask-task1-v0"
     alpha="6000"
+    num_candidates="5"
+    discount="0.995"
+    time_steps="50"
+    metric="evaluation/success"
+    project_name="meanflowql_upstream_humanoid_large"
+    ;;
+  # Same task as humanoid_large_task1 but with the per-task alpha from the
+  # paper's Table 7 (10000).  The upstream README example uses 6000, so the two
+  # are kept side by side instead of silently changing the historical profile.
+  humanoid_large_task1_paper)
+    env_name="humanoidmaze-large-navigate-singletask-task1-v0"
+    alpha="10000"
+    num_candidates="5"
     discount="0.995"
     time_steps="50"
     metric="evaluation/success"
@@ -35,6 +48,7 @@ case "$task_profile" in
   relocate_cloned)
     env_name="relocate-cloned-v1"
     alpha="10000"
+    num_candidates="5"
     discount="0.99"
     time_steps="50"
     metric="evaluation/episode.normalized_return"
@@ -47,6 +61,7 @@ case "$task_profile" in
   pen_cloned_v1)
     env_name="pen-cloned-v1"
     alpha="10000"
+    num_candidates="5"
     discount="0.99"
     time_steps="100"
     metric="evaluation/episode.normalized_return"
@@ -55,10 +70,86 @@ case "$task_profile" in
   hammer_cloned_v1)
     env_name="hammer-cloned-v1"
     alpha="11000"
+    num_candidates="5"
     discount="0.99"
     time_steps="100"
     metric="evaluation/episode.normalized_return"
     project_name="meanflowql_upstream_hammer"
+    ;;
+  door_cloned_v1)
+    env_name="door-cloned-v1"
+    alpha="9000"
+    num_candidates="5"
+    discount="0.99"
+    time_steps="50"
+    metric="evaluation/episode.normalized_return"
+    project_name="meanflowql_upstream_door"
+    ;;
+  # D4RL antmaze profiles.  success rate is the reported metric; alpha and
+  # time_steps are the per-task values from Table 7.
+  antmaze_umaze_v2)
+    env_name="antmaze-umaze-v2"
+    alpha="100"
+    num_candidates="5"
+    discount="0.99"
+    time_steps="10000"
+    metric="evaluation/success"
+    project_name="meanflowql_upstream_antmaze"
+    ;;
+  antmaze_umaze_diverse_v2)
+    env_name="antmaze-umaze-diverse-v2"
+    alpha="130"
+    num_candidates="5"
+    discount="0.99"
+    time_steps="100"
+    metric="evaluation/success"
+    project_name="meanflowql_upstream_antmaze"
+    ;;
+  antmaze_medium_play_v2)
+    env_name="antmaze-medium-play-v2"
+    alpha="10"
+    num_candidates="5"
+    discount="0.99"
+    time_steps="50"
+    metric="evaluation/success"
+    project_name="meanflowql_upstream_antmaze"
+    ;;
+  antmaze_medium_diverse_v2)
+    env_name="antmaze-medium-diverse-v2"
+    alpha="50"
+    num_candidates="5"
+    discount="0.99"
+    time_steps="50"
+    metric="evaluation/success"
+    project_name="meanflowql_upstream_antmaze"
+    ;;
+  antmaze_large_play_v2)
+    env_name="antmaze-large-play-v2"
+    alpha="10"
+    num_candidates="5"
+    discount="0.99"
+    time_steps="100"
+    metric="evaluation/success"
+    project_name="meanflowql_upstream_antmaze"
+    ;;
+  # OGBench profiles (state-based; discount 0.995 as in the upstream command).
+  humanoidmaze_medium_task1)
+    env_name="humanoidmaze-medium-navigate-singletask-task1-v0"
+    alpha="150"
+    num_candidates="5"
+    discount="0.995"
+    time_steps="50"
+    metric="evaluation/success"
+    project_name="meanflowql_upstream_humanoid_medium"
+    ;;
+  cube_double_play_task2)
+    env_name="cube-double-play-singletask-task2-v0"
+    alpha="120"
+    num_candidates="5"
+    discount="0.995"
+    time_steps="50"
+    metric="evaluation/success"
+    project_name="meanflowql_upstream_cube_double"
     ;;
   *)
     echo "unknown task profile: $task_profile" >&2
@@ -116,7 +207,7 @@ mkdir -p "$output_root"
   printf 'alpha=%s\n' "$alpha"
   printf 'discount=%s\n' "$discount"
   printf 'time_steps=%s\n' "$time_steps"
-  printf 'num_candidates=5\n'
+  printf 'num_candidates=%s\n' "$num_candidates"
   printf 'log_interval=%s\n' "$log_interval"
   printf 'early_stopping=false\n'
   if [[ "$arm" == "n" || "$arm" == "n_offline_gated" || "$arm" == "n_path_local" ]]; then
@@ -146,7 +237,7 @@ exec bash "$project_root/scripts/experiment_env.sh" main_meanflowql.py \
   --agent.alpha="$alpha" \
   --agent.time_steps="$time_steps" \
   --agent.discount="$discount" \
-  --agent.num_candidates=5 \
+  --agent.num_candidates="$num_candidates" \
   --agent.consistency_alpha=0 \
   "${agent_extra_flags[@]}" \
   --seed="$seed" \
