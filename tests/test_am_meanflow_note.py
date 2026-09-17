@@ -28,7 +28,7 @@ def close_tree(a, b, atol=1e-6):
     )
 
 
-def make_agent(variant="note_adjoint"):
+def make_agent(variant="note_adjoint", transport_target_mode="interval_mean"):
     config = get_config()
     config.encoder = None
     config.actor_hidden_dims = 16
@@ -43,6 +43,7 @@ def make_agent(variant="note_adjoint"):
     config.behavior_warmup_updates = 3
     config.alpha = 1.0
     config.variant = variant
+    config.transport_target_mode = transport_target_mode
     config.use_dynamic_alpha = False
     config.time_steps = 8
     observations = jnp.array(
@@ -139,22 +140,27 @@ class NoteAgentTest(unittest.TestCase):
             0.0,
         )
 
-        target = lambda pre, ema: self.warm.replace(
-            pre_actor_params=pre, target_actor_params=ema
-        ).transport_batch(
-            self.batch["observations"], jax.random.PRNGKey(4)
-        )[0][-1].sum()
-        pre_gradient, ema_gradient = jax.grad(target, argnums=(0, 1))(
-            self.warm.pre_actor_params, self.warm.target_actor_params
-        )
-        self.assertTrue(
-            all(
-                np.all(np.asarray(value) == 0)
-                for value in jax.tree_util.tree_leaves(
-                    (pre_gradient, ema_gradient)
-                )
+        for mode in ("interval_mean", "path_local"):
+            config = flax.core.unfreeze(self.warm.config)
+            config["transport_target_mode"] = mode
+            agent = self.warm.replace(config=config)
+            target = lambda pre, ema: agent.replace(
+                pre_actor_params=pre, target_actor_params=ema
+            ).transport_batch(
+                self.batch["observations"], jax.random.PRNGKey(4)
+            )[0][-1].sum()
+            pre_gradient, ema_gradient = jax.grad(target, argnums=(0, 1))(
+                agent.pre_actor_params, agent.target_actor_params
             )
-        )
+            self.assertTrue(
+                all(
+                    np.all(np.asarray(value) == 0)
+                    for value in jax.tree_util.tree_leaves(
+                        (pre_gradient, ema_gradient)
+                    )
+                ),
+                mode,
+            )
 
     def test_transport_batch_shape_and_endpoint_target(self):
         data, _, path = jax.jit(self.warm.transport_batch)(
@@ -166,6 +172,34 @@ class NoteAgentTest(unittest.TestCase):
         np.testing.assert_allclose(x[full] - velocity[full], path[-1], atol=1e-6)
         self.assertEqual(int(jnp.sum(r == t)), 4)
         self.assertTrue(np.all(np.isfinite(velocity)))
+
+    def test_path_local_uses_same_path_and_only_instantaneous_targets(self):
+        config = flax.core.unfreeze(self.warm.config)
+        config["transport_target_mode"] = "path_local"
+        local = self.warm.replace(config=config)
+        rng = jax.random.PRNGKey(7)
+        interval_data, interval_noise, interval_path = self.warm.transport_batch(
+            self.batch["observations"], rng
+        )
+        local_data, local_noise, local_path = local.transport_batch(
+            self.batch["observations"], rng
+        )
+        interval_obs, interval_x, _, interval_t, _ = interval_data
+        local_obs, local_x, local_r, local_t, local_velocity = local_data
+        np.testing.assert_allclose(local_noise, interval_noise, atol=1e-6)
+        np.testing.assert_allclose(local_path, interval_path, atol=1e-6)
+        np.testing.assert_allclose(local_x, interval_x, atol=1e-6)
+        np.testing.assert_allclose(local_obs, interval_obs, atol=1e-6)
+        np.testing.assert_allclose(local_t, interval_t, atol=1e-6)
+        np.testing.assert_allclose(local_r, local_t, atol=0.0)
+        expected = local.teacher_field(local_obs, local_x, local_t)
+        np.testing.assert_allclose(local_velocity, expected, atol=1e-6)
+        self.assertEqual(local_x.shape, (16, 2))
+        self.assertTrue(np.all(np.isfinite(local_velocity)))
+
+    def test_invalid_transport_target_mode_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "transport target mode"):
+            make_agent(transport_target_mode="unknown")
 
     def test_gated_control_schedule_and_terms_are_bounded(self):
         config = flax.core.unfreeze(self.warm.config)

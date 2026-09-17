@@ -80,6 +80,11 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
                 raise ValueError(f"{key} must be positive")
         if config["teacher_solver"] != "midpoint_rk2" or config["jacobian_fd_eps"] <= 0:
             raise ValueError("Invalid teacher or finite-difference configuration")
+        if config["transport_target_mode"] not in {
+            "interval_mean",
+            "path_local",
+        }:
+            raise ValueError("Invalid transport target mode")
         if min(
             config["control_eta"],
             config["control_adjoint_clip"],
@@ -358,17 +363,34 @@ class AMMeanFlowNoteAgent(MeanFlowQL_Agent):
         )
         rows = jnp.arange(count)[:, None]
         x = path[i, rows]
-        y = path[j, rows]
         t = (1 - i / steps)[..., None]
-        r = (1 - j / steps)[..., None]
-        average = (x - y) / jnp.maximum(t - r, 1 / steps)
-        diagonal_obs = jnp.repeat(obs, 2, axis=0)
-        diagonal_x = path[diagonal, rows].reshape(-1, self.config["action_dim"])
-        diagonal_t = (1 - diagonal / steps).reshape(-1, 1)
-        diagonal_velocity = self.teacher_field(
-            diagonal_obs, diagonal_x, diagonal_t, control_eta, uncertainty_scale
-        ).reshape(count, 2, -1)
-        average = average.at[:, 1:3].set(diagonal_velocity)
+        if self.config["transport_target_mode"] == "path_local":
+            r = t
+            local_obs = jnp.repeat(obs, 8, axis=0)
+            average = self.teacher_field(
+                local_obs,
+                x.reshape(-1, self.config["action_dim"]),
+                t.reshape(-1, 1),
+                control_eta,
+                uncertainty_scale,
+            ).reshape(count, 8, -1)
+        else:
+            y = path[j, rows]
+            r = (1 - j / steps)[..., None]
+            average = (x - y) / jnp.maximum(t - r, 1 / steps)
+            diagonal_obs = jnp.repeat(obs, 2, axis=0)
+            diagonal_x = path[diagonal, rows].reshape(
+                -1, self.config["action_dim"]
+            )
+            diagonal_t = (1 - diagonal / steps).reshape(-1, 1)
+            diagonal_velocity = self.teacher_field(
+                diagonal_obs,
+                diagonal_x,
+                diagonal_t,
+                control_eta,
+                uncertainty_scale,
+            ).reshape(count, 2, -1)
+            average = average.at[:, 1:3].set(diagonal_velocity)
         data = (
             jnp.repeat(obs, 8, axis=0),
             x.reshape(-1, x.shape[-1]),
@@ -573,6 +595,7 @@ def get_config():
             control_adjoint_clip=0.0,
             control_uncertainty_scale=0.0,
             control_uncertainty_end_update=-1,
+            transport_target_mode="interval_mean",
             teacher_steps=8,
             teacher_solver="midpoint_rk2",
             teacher_batch_size=32,

@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
-  echo "usage: $0 {b0|n|n_offline_gated} {humanoid_large_task1|relocate_cloned} SEED OUTPUT_ROOT" >&2
+  echo "usage: $0 {b0|n|n_offline_gated|n_path_local} {humanoid_large_task1|relocate_cloned} SEED OUTPUT_ROOT" >&2
   exit 2
 fi
 
@@ -16,9 +16,9 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 case "$arm" in
   b0) agent="agents/meanflowql.py" ;;
-  n|n_offline_gated) agent="agents/am_meanflow_note.py" ;;
+  n|n_offline_gated|n_path_local) agent="agents/am_meanflow_note.py" ;;
   *)
-    echo "arm must be b0, n, or n_offline_gated" >&2
+    echo "arm must be b0, n, n_offline_gated, or n_path_local" >&2
     exit 2
     ;;
 esac
@@ -59,8 +59,18 @@ run_group="${arm}_${task_profile}_seed${seed}"
 # the actual adjoint-control branch, rather than just behavior initialization,
 # is exercised before formal jobs are launched.
 agent_extra_flags=()
-if [[ ( "$arm" == "n" || "$arm" == "n_offline_gated" ) && -n "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-}" ]]; then
+if [[ ( "$arm" == "n" || "$arm" == "n_offline_gated" || "$arm" == "n_path_local" ) && -n "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-}" ]]; then
   agent_extra_flags+=("--agent.behavior_warmup_updates=${AM_MF_BEHAVIOR_WARMUP_UPDATES}")
+fi
+if [[ "$arm" == "n_path_local" ]]; then
+  agent_extra_flags+=(
+    "--agent.transport_target_mode=path_local"
+    "--agent.control_eta=0.1"
+    "--agent.control_eta_ramp_updates=0"
+    "--agent.control_adjoint_clip=0"
+    "--agent.control_uncertainty_scale=0"
+    "--agent.control_uncertainty_end_update=-1"
+  )
 fi
 if [[ "$arm" == "n_offline_gated" ]]; then
   # Conservative offline-AM ablation. The original N default remains exact
@@ -89,8 +99,16 @@ mkdir -p "$output_root"
   printf 'num_candidates=5\n'
   printf 'log_interval=%s\n' "$log_interval"
   printf 'early_stopping=false\n'
-  if [[ "$arm" == "n" || "$arm" == "n_offline_gated" ]]; then
+  if [[ "$arm" == "n" || "$arm" == "n_offline_gated" || "$arm" == "n_path_local" ]]; then
     printf 'behavior_warmup_updates=%s\n' "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-500000}"
+  fi
+  if [[ "$arm" == "n_path_local" ]]; then
+    printf 'transport_target_mode=path_local\n'
+    printf 'control_eta=0.1\n'
+    printf 'control_eta_ramp_updates=0\n'
+    printf 'control_adjoint_clip=0\n'
+    printf 'control_uncertainty_scale=0\n'
+    printf 'control_uncertainty_end_update=-1\n'
   fi
   if [[ "$arm" == "n_offline_gated" ]]; then
     printf 'control_eta_ramp_updates=%s\n' "${AM_MF_CONTROL_ETA_RAMP_UPDATES:-500000}"
