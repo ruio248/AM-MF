@@ -85,15 +85,18 @@ case "$task_profile" in
     metric="evaluation/episode.normalized_return"
     project_name="meanflowql_upstream_door"
     ;;
-  # D4RL antmaze profiles.  success rate is the reported metric; alpha and
-  # time_steps are the per-task values from Table 7.
+  # D4RL antmaze profiles.  alpha and time_steps are the per-task values from
+  # Table 7.  D4RL antmaze returns 0/1 reward per step and ends on success, and
+  # d4rl normalises its score by x100, so evaluation/episode.normalized_return
+  # *is* the success percentage reported in the paper (the evaluator only emits
+  # evaluation/success for OGBench environments).
   antmaze_umaze_v2)
     env_name="antmaze-umaze-v2"
     alpha="100"
     num_candidates="5"
     discount="0.99"
     time_steps="10000"
-    metric="evaluation/success"
+    metric="evaluation/episode.normalized_return"
     project_name="meanflowql_upstream_antmaze"
     ;;
   antmaze_umaze_diverse_v2)
@@ -102,7 +105,7 @@ case "$task_profile" in
     num_candidates="5"
     discount="0.99"
     time_steps="100"
-    metric="evaluation/success"
+    metric="evaluation/episode.normalized_return"
     project_name="meanflowql_upstream_antmaze"
     ;;
   antmaze_medium_play_v2)
@@ -111,7 +114,7 @@ case "$task_profile" in
     num_candidates="5"
     discount="0.99"
     time_steps="50"
-    metric="evaluation/success"
+    metric="evaluation/episode.normalized_return"
     project_name="meanflowql_upstream_antmaze"
     ;;
   antmaze_medium_diverse_v2)
@@ -120,7 +123,7 @@ case "$task_profile" in
     num_candidates="5"
     discount="0.99"
     time_steps="50"
-    metric="evaluation/success"
+    metric="evaluation/episode.normalized_return"
     project_name="meanflowql_upstream_antmaze"
     ;;
   antmaze_large_play_v2)
@@ -129,7 +132,7 @@ case "$task_profile" in
     num_candidates="5"
     discount="0.99"
     time_steps="100"
-    metric="evaluation/success"
+    metric="evaluation/episode.normalized_return"
     project_name="meanflowql_upstream_antmaze"
     ;;
   # OGBench profiles (state-based; discount 0.995 as in the upstream command).
