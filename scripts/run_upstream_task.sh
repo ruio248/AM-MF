@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
-  echo "usage: $0 {b0|n|n_offline_gated|n_path_local} {humanoid_large_task1|relocate_cloned} SEED OUTPUT_ROOT" >&2
+  echo "usage: $0 {b0|n|n_offline_gated|n_path_local} {humanoid_large_task1|relocate_cloned|pen_cloned_v1|hammer_cloned_v1} SEED OUTPUT_ROOT" >&2
   exit 2
 fi
 
@@ -39,6 +39,26 @@ case "$task_profile" in
     time_steps="50"
     metric="evaluation/episode.normalized_return"
     project_name="meanflowql_upstream_relocate"
+    ;;
+  # D4RL Adroit profiles.  alpha, num_candidates and time_steps follow the
+  # per-task values in MeanFlowQL Appendix Table 7; the D4RL discount is the
+  # default 0.99 and the offline-to-online budget is 1M offline + 1M online as
+  # described in Appendix D and reported at 1M and 2M gradient steps.
+  pen_cloned_v1)
+    env_name="pen-cloned-v1"
+    alpha="10000"
+    discount="0.99"
+    time_steps="100"
+    metric="evaluation/episode.normalized_return"
+    project_name="meanflowql_upstream_pen"
+    ;;
+  hammer_cloned_v1)
+    env_name="hammer-cloned-v1"
+    alpha="11000"
+    discount="0.99"
+    time_steps="100"
+    metric="evaluation/episode.normalized_return"
+    project_name="meanflowql_upstream_hammer"
     ;;
   *)
     echo "unknown task profile: $task_profile" >&2

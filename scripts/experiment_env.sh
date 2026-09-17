@@ -22,6 +22,10 @@ fi
 export MUJOCO_GL=egl
 export PYOPENGL_PLATFORM=egl
 export D4RL_SUPPRESS_IMPORT_ERROR=1
+# D4RL writes multi-GB hdf5 files into its dataset directory.  The default
+# (~/.d4rl/datasets) lives on the small root overlay, so keep them next to the
+# worktrees on the data volume unless the caller overrides the location.
+export D4RL_DATASET_DIR="${D4RL_DATASET_DIR:-$(cd "$project_root/.." && pwd)/d4rl_datasets}"
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export PYTHONHASHSEED=0
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
