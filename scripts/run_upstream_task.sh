@@ -167,6 +167,12 @@ eval_episodes="${AM_MF_EVAL_EPISODES:-50}"
 save_interval="${AM_MF_SAVE_INTERVAL:-100000}"
 buffer_size="${AM_MF_BUFFER_SIZE:-2000000}"
 log_interval="${AM_MF_LOG_INTERVAL:-5000}"
+# Optional overrides used by the online-phase ablations.  Defaults keep the
+# upstream values (alpha from Table 7, uniform sampling over the offline+online
+# buffer, unnormalised Q loss).
+alpha="${AM_MF_ALPHA:-$alpha}"
+balanced_sampling="${AM_MF_BALANCED_SAMPLING:-0}"
+normalize_q_loss="${AM_MF_NORMALIZE_Q_LOSS:-False}"
 run_group="${arm}_${task_profile}_seed${seed}"
 # The formal N protocol uses the agent default (500k updates).  A short smoke
 # run can lower this *only* through an explicit environment override so that
@@ -223,6 +229,8 @@ mkdir -p "$output_root"
   printf 'num_candidates=%s\n' "$num_candidates"
   printf 'log_interval=%s\n' "$log_interval"
   printf 'early_stopping=false\n'
+  printf 'balanced_sampling=%s\n' "$balanced_sampling"
+  printf 'normalize_q_loss=%s\n' "$normalize_q_loss"
   if [[ "$arm" == "n" || "$arm" == "n_offline_gated" || "$arm" == "n_path_local" ]]; then
     printf 'behavior_warmup_updates=%s\n' "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-500000}"
   fi
@@ -262,7 +270,8 @@ exec bash "$project_root/scripts/experiment_env.sh" main_meanflowql.py \
   --online_steps="$online_steps" \
   --buffer_size="$buffer_size" \
   --pretrain_factor=0 \
-  --balanced_sampling=0 \
+  --balanced_sampling="$balanced_sampling" \
+  --agent.normalize_q_loss="$normalize_q_loss" \
   --use_observation_normalization=True \
   --eval_episodes="$eval_episodes" \
   --eval_interval="$eval_interval" \
