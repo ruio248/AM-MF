@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
-  echo "usage: $0 {b0|n|n_offline_gated|n_path_local} {humanoid_large_task1|humanoid_large_task1_paper|relocate_cloned|pen_cloned_v1|hammer_cloned_v1|door_cloned_v1|antmaze_umaze_v2|antmaze_umaze_diverse_v2|antmaze_medium_play_v2|antmaze_medium_diverse_v2|antmaze_large_play_v2|humanoidmaze_medium_task1|cube_double_play_task2} SEED OUTPUT_ROOT" >&2
+  echo "usage: $0 {b0|n|n_offline_gated|n_path_local|n_online_only} {humanoid_large_task1|humanoid_large_task1_paper|relocate_cloned|pen_cloned_v1|hammer_cloned_v1|door_cloned_v1|antmaze_umaze_v2|antmaze_umaze_diverse_v2|antmaze_medium_play_v2|antmaze_medium_diverse_v2|antmaze_large_play_v2|humanoidmaze_medium_task1|cube_double_play_task2} SEED OUTPUT_ROOT" >&2
   exit 2
 fi
 
@@ -16,9 +16,9 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 case "$arm" in
   b0) agent="agents/meanflowql.py" ;;
-  n|n_offline_gated|n_path_local) agent="agents/am_meanflow_note.py" ;;
+  n|n_offline_gated|n_path_local|n_online_only) agent="agents/am_meanflow_note.py" ;;
   *)
-    echo "arm must be b0, n, n_offline_gated, or n_path_local" >&2
+    echo "arm must be b0, n, n_offline_gated, n_path_local, or n_online_only" >&2
     exit 2
     ;;
 esac
@@ -196,6 +196,16 @@ if [[ "$arm" == "n_offline_gated" ]]; then
     "--agent.control_uncertainty_end_update=${AM_MF_CONTROL_UNCERTAINTY_END_UPDATE:-$offline_steps}"
   )
 fi
+if [[ "$arm" == "n_online_only" ]]; then
+  # AM is off for the entire offline phase and activates on the first online
+  # update.  The host loop runs offline updates for i <= offline_steps while the
+  # agent picks its phase with `current_step < behavior_warmup_updates`, so the
+  # warmup must be offline_steps + 1 for AM to never touch an offline update.
+  online_only_warmup=$((offline_steps + 1))
+  agent_extra_flags+=(
+    "--agent.behavior_warmup_updates=${online_only_warmup}"
+  )
+fi
 
 mkdir -p "$output_root"
 {
@@ -215,6 +225,10 @@ mkdir -p "$output_root"
   printf 'early_stopping=false\n'
   if [[ "$arm" == "n" || "$arm" == "n_offline_gated" || "$arm" == "n_path_local" ]]; then
     printf 'behavior_warmup_updates=%s\n' "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-500000}"
+  fi
+  if [[ "$arm" == "n_online_only" ]]; then
+    printf 'behavior_warmup_updates=%s\n' "$online_only_warmup"
+    printf 'am_phase=online_only\n'
   fi
   if [[ "$arm" == "n_path_local" ]]; then
     printf 'transport_target_mode=path_local\n'
