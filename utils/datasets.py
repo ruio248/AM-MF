@@ -64,9 +64,19 @@ class Dataset(FrozenDict):
         self.terminal_locs = np.nonzero(self['terminals'] > 0)[0]
         self.initial_locs = np.concatenate([[0], self.terminal_locs[:-1] + 1])
     
-    def compute_normalization_stats(self):
-        """Compute mean and standard deviation of observations for normalization."""
+    def compute_normalization_stats(self, valid_only=False):
+        """Compute mean and standard deviation of observations for normalization.
+
+        When a ReplayBuffer is created with `create_from_initial_dataset`, the
+        underlying arrays are zero-padded up to the buffer capacity.  The
+        upstream implementation averages over the whole array, so the padding
+        contaminates the statistics.  `valid_only=True` restricts the statistics
+        to the first `self.size` transitions; `valid_only=False` reproduces the
+        upstream behaviour exactly.
+        """
         observations = self['observations']
+        if valid_only:
+            observations = observations[: self.size]
         self.obs_mean = np.mean(observations, axis=0, keepdims=True)
         self.obs_std = np.std(observations, axis=0, keepdims=True)
         # Avoid division by zero

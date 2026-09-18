@@ -173,6 +173,9 @@ log_interval="${AM_MF_LOG_INTERVAL:-5000}"
 alpha="${AM_MF_ALPHA:-$alpha}"
 balanced_sampling="${AM_MF_BALANCED_SAMPLING:-0}"
 normalize_q_loss="${AM_MF_NORMALIZE_Q_LOSS:-False}"
+# Audit flags (audit-fixes branch only): see docs/AUDIT_PATCHES.md.
+strict_norm_stats="${AM_MF_STRICT_NORM_STATS:-False}"
+critic_lr="${AM_MF_CRITIC_LR:-3e-4}"
 run_group="${arm}_${task_profile}_seed${seed}"
 # The formal N protocol uses the agent default (500k updates).  A short smoke
 # run can lower this *only* through an explicit environment override so that
@@ -231,6 +234,8 @@ mkdir -p "$output_root"
   printf 'early_stopping=false\n'
   printf 'balanced_sampling=%s\n' "$balanced_sampling"
   printf 'normalize_q_loss=%s\n' "$normalize_q_loss"
+  printf 'strict_norm_stats=%s\n' "$strict_norm_stats"
+  printf 'critic_lr=%s\n' "$critic_lr"
   if [[ "$arm" == "n" || "$arm" == "n_offline_gated" || "$arm" == "n_path_local" ]]; then
     printf 'behavior_warmup_updates=%s\n' "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-500000}"
   fi
@@ -272,6 +277,8 @@ exec bash "$project_root/scripts/experiment_env.sh" main_meanflowql.py \
   --pretrain_factor=0 \
   --balanced_sampling="$balanced_sampling" \
   --agent.normalize_q_loss="$normalize_q_loss" \
+  --agent.critic_lr="$critic_lr" \
+  --strict_norm_stats="$strict_norm_stats" \
   --use_observation_normalization=True \
   --eval_episodes="$eval_episodes" \
   --eval_interval="$eval_interval" \

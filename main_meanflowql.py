@@ -38,6 +38,14 @@ flags.DEFINE_string('wandb_save_dir', 'debug/', 'Wandb offline data save directo
 flags.DEFINE_string('restore_path', None, 'Restore path.')
 flags.DEFINE_integer('restore_epoch', None, 'Restore epoch.')
 flags.DEFINE_boolean('use_observation_normalization', True, 'Whether to normalize observations')
+# Audit flag: upstream computes the observation statistics over the whole replay
+# buffer, including the zero padding that `create_from_initial_dataset` leaves
+# beyond the valid transitions.  With this flag the statistics are restricted to
+# the valid transitions (see docs/AUDIT_PATCHES.md).
+flags.DEFINE_boolean(
+    'strict_norm_stats', False,
+    'Compute observation normalisation statistics over valid transitions only.'
+)
 
 # Training configuration flags
 flags.DEFINE_integer('offline_steps', 1000000, 'Number of offline steps.')
@@ -129,7 +137,9 @@ def main(_):
     if FLAGS.use_observation_normalization:
         print("Computing observation normalization statistics...")
         if train_dataset is not None:
-            train_dataset.compute_normalization_stats()
+            train_dataset.compute_normalization_stats(
+                valid_only=FLAGS.strict_norm_stats
+            )
             train_dataset.enable_normalization(True)
         if val_dataset is not None and train_dataset is not None:
             val_dataset.obs_mean = train_dataset.obs_mean

@@ -808,7 +808,11 @@ class MeanFlowQL_Agent(flax.struct.PyTreeNode):
         
         # Create phase-aware learning rate schedules
         actor_lr_schedule = create_phase_aware_lr_schedule(base_lr, min_lr, warmup_steps, offline_end_step)
-        critic_lr_schedule = lambda _: 3e-4
+        # Upstream hard-codes 3e-4 here while the paper's Table 6 lists 1e-4 for
+        # the critic (see docs/AUDIT_PATCHES.md).  The default keeps the upstream
+        # value so the flag only changes behaviour when it is set explicitly.
+        critic_lr = config.get('critic_lr', 3e-4)
+        critic_lr_schedule = lambda _: critic_lr
         
         config['actor_lr_schedule'] = actor_lr_schedule
         config['critic_lr_schedule'] = critic_lr_schedule
@@ -972,6 +976,7 @@ def get_config():
             # critic config
             value_hidden_dims=(512, 512, 512, 512),  # Value network hidden dimensions.
             layer_norm=True,  # Whether to use layer normalization.
+            critic_lr=3e-4,  # Upstream hard-codes 3e-4; paper Table 6 lists 1e-4 (see docs/AUDIT_PATCHES.md).
 
             # actor config 
             lr=1e-4,
