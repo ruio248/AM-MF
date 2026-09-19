@@ -1,5 +1,14 @@
 # Seven-task comparison: AM-MF (N) vs MeanFlowQL, and the paper's MeanFlowQL / FQL
 
+> **Context update (2026-09-19, later the same day).**  This comparison was
+> produced with the Table 7 `alpha` values.  Those values are now known to be
+> mis-scaled for this harness on the D4RL Adroit tasks: with the retuned values
+> (door 300-900, pen 300, hammer 3000, relocate 3000) the B0 baseline reproduces
+> the paper on all four tasks, and the N-vs-B0 picture at matched alpha is
+> different.  Read this document together with
+> `docs/DIAGNOSTICS_2026-09-19.md` (sections 1 and 4), which supersedes its N
+> vs B0 conclusions.
+
 Date: 2026-09-19.  Host: A800 (`new_server_rh_2`), artifacts under
 `artifacts/n_main_v1` (N, six tasks) and `artifacts/formal/relocate_cloned/`
 (relocate, three seeds); B0 baselines under `artifacts/gate_pen_hammer_v1` and
