@@ -185,6 +185,11 @@ agent_extra_flags=()
 if [[ ( "$arm" == "n" || "$arm" == "n_offline_gated" || "$arm" == "n_path_local" ) && -n "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-}" ]]; then
   agent_extra_flags+=("--agent.behavior_warmup_updates=${AM_MF_BEHAVIOR_WARMUP_UPDATES}")
 fi
+# Control strength (eta) of the TI-AM guided field.  The agent default is 0.1;
+# exposing it here lets the eta sweep run on one branch without editing code.
+if [[ ( "$arm" == "n" || "$arm" == "n_online_only" ) && -n "${AM_MF_CONTROL_ETA:-}" ]]; then
+  agent_extra_flags+=("--agent.control_eta=${AM_MF_CONTROL_ETA}")
+fi
 if [[ "$arm" == "n_path_local" ]]; then
   agent_extra_flags+=(
     "--agent.transport_target_mode=path_local"
@@ -236,6 +241,9 @@ mkdir -p "$output_root"
   printf 'normalize_q_loss=%s\n' "$normalize_q_loss"
   printf 'strict_norm_stats=%s\n' "$strict_norm_stats"
   printf 'critic_lr=%s\n' "$critic_lr"
+  if [[ ( "$arm" == "n" || "$arm" == "n_online_only" ) ]]; then
+    printf 'control_eta=%s\n' "${AM_MF_CONTROL_ETA:-0.1}"
+  fi
   if [[ "$arm" == "n" || "$arm" == "n_offline_gated" || "$arm" == "n_path_local" ]]; then
     printf 'behavior_warmup_updates=%s\n' "${AM_MF_BEHAVIOR_WARMUP_UPDATES:-500000}"
   fi
