@@ -1,10 +1,19 @@
 # Baseline reproduction gate: 2026-09-18
 
 Runs executed on the A800 host with the frozen upstream MeanFlowQL runner.
-Every run is B0 (`agents/meanflowql.py`), 1M offline + 1M online updates,
-evaluation every 100K updates over 50 episodes, per-task hyperparameters from
-Table 7 (see `PAPER_PROTOCOL_MAPPING.md`).  Values are the evaluation at
-1,000,000 (offline end) and 2,000,000 gradient steps, matching Appendix D.
+Every run in this note is B0 (`agents/meanflowql.py`) with 1M offline + 1M
+online updates, evaluation every 100K updates over 50 episodes, and per-task
+hyperparameters from Table 7 (see `PAPER_PROTOCOL_MAPPING.md`).  Values are the
+evaluation at 1,000,000 (offline end) and 2,000,000 gradient steps, matching
+Appendix D.
+
+**Correction (2026-09-19).**  The relocate row below used to show
+`21.06 / 47.14 / 39.05`, which are the **N (AM)** results from the 2026-09-14
+formal pair, not B0.  The B0 relocate numbers are `0.72 / 0.03 / -0.03`
+(mean 0.243); the N numbers are kept in a separate row.  Also note that all
+Table 7 alpha values used in this note are now known to be mis-scaled for this
+harness on the Adroit tasks; see `DIAGNOSTICS_2026-09-19.md` for the retuned
+per-task alpha values (door 300-900, pen 300, hammer 3000, relocate 3000).
 
 Artifacts:
 
@@ -26,7 +35,8 @@ Artifacts:
 | antmaze-medium-play-v2 | 24.00 | 96.00 | 86+-2 -> 99+-1 | online reproduced, offline low |
 | antmaze-umaze-v2 | 94.00 | 98.00 | 98+-1 -> 99+-1 | online reproduced, offline 4 sd low |
 | antmaze-umaze-diverse-v2 | 96.00 | 100.00 | 79+-2 -> 100+-1 | online reproduced, offline high |
-| relocate-cloned-v1 (earlier, 3 seeds) | ~-0.02 | 21.06 / 47.14 / 39.05 | 1+-1 -> 19+-8 | offline ok, online task-specific |
+| relocate-cloned-v1, B0 (2026-09-14, 3 seeds) | ~-0.02 | 0.72 / 0.03 / -0.03 | 1+-1 -> 19+-8 | online failed at alpha=10000 |
+| relocate-cloned-v1, N (2026-09-14, 3 seeds) | ~-0.007 | 21.06 / 47.14 / 39.05 | 1+-1 -> 19+-8 | N only; alpha=10000 |
 
 ## OGBench (metric: `evaluation/success`)
 

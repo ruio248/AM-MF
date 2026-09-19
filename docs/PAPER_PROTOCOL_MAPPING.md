@@ -79,6 +79,14 @@ The last column is the reported offline-to-online number (Table 2, "Ours").
    `visual-scene`, `visual-puzzle-3x3/4x4`) are excluded: the upstream runner
    asserts that online fine-tuning is not supported for visual environments and
    they need the pixel encoder.
+8. **The Table 7 alpha values are mis-scaled for this harness on D4RL Adroit.**
+   Measured B0 endpoints: door 1.9 at alpha=9000 but 90-91 at alpha=300-900;
+   pen 118 at alpha=10000 but 150.1 at alpha=300; hammer 131 at alpha=11000 but
+   141.3 at alpha=3000; relocate 0.24 at alpha=10000 but 16.5 at alpha=3000.
+   With the retuned values all four tasks reproduce the published numbers.  See
+   `DIAGNOSTICS_2026-09-19.md` sections 1-2 for the full sweep and for the
+   audit matrix showing that the observation-normalisation zero-padding defect
+   and the hard-coded `3e-4` critic learning rate are *not* the cause.
 
 ## 4. Dataset provenance
 
