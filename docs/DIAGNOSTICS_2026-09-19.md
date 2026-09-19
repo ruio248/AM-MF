@@ -197,3 +197,10 @@ Concrete adoptions for this codebase, in order of cost:
 
 Every run directory contains `launch_manifest.txt` with the commit, the tree
 state, and the full flag set.
+
+## 8. Verifiable metric archive
+
+The `eval.csv`, `train.csv` and `launch_manifest.txt` of every run listed above
+are committed under `metrics/<host>/<run-group>/<run>/` (see `metrics/README.md`
+for the layout).  The large `runner.log` files and the checkpoints remain on the
+A800 and 4090 hosts.

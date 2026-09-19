@@ -1,0 +1,16 @@
+git_commit=8ca0ac1814c299644a5ce67bce219c92011227c5
+git_status=?? artifacts/
+?? dataset/
+?? runtime/
+arm=b0
+task_profile=antmaze_medium_diverse_v2
+env_name=antmaze-medium-diverse-v2
+seed=1
+offline_steps=1000000
+online_steps=1000000
+alpha=50
+discount=0.99
+time_steps=50
+num_candidates=5
+log_interval=5000
+early_stopping=false

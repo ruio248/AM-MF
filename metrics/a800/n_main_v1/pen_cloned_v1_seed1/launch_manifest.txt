@@ -1,0 +1,17 @@
+git_commit=7912d976c3ea7ae63778a40059d23938a05641bc
+git_status=?? artifacts/
+?? dataset/
+?? runtime/
+arm=n
+task_profile=pen_cloned_v1
+env_name=pen-cloned-v1
+seed=1
+offline_steps=1000000
+online_steps=1000000
+alpha=10000
+discount=0.99
+time_steps=100
+num_candidates=5
+log_interval=5000
+early_stopping=false
+behavior_warmup_updates=500000

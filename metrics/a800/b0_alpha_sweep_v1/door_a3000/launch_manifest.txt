@@ -1,0 +1,19 @@
+git_commit=007b4cabcd6336cc6d27192de7010b5dbb74df74
+git_status=?? artifacts/
+?? b0_alpha_sweep_a800.sh
+?? dataset/
+?? runtime/
+arm=b0
+task_profile=door_cloned_v1
+env_name=door-cloned-v1
+seed=1
+offline_steps=1000000
+online_steps=1000000
+alpha=3000
+discount=0.99
+time_steps=50
+num_candidates=5
+log_interval=5000
+early_stopping=false
+balanced_sampling=0
+normalize_q_loss=False

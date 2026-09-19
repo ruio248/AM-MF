@@ -1,0 +1,18 @@
+git_commit=079557337ed64f3f3b74809d60b289d33529a616
+git_status=?? artifacts/
+?? dataset/
+?? runtime/
+arm=n_online_only
+task_profile=antmaze_large_play_v2
+env_name=antmaze-large-play-v2
+seed=1
+offline_steps=1000000
+online_steps=1000000
+alpha=10
+discount=0.99
+time_steps=100
+num_candidates=5
+log_interval=5000
+early_stopping=false
+behavior_warmup_updates=1000001
+am_phase=online_only

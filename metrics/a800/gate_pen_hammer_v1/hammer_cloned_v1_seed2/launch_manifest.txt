@@ -1,0 +1,15 @@
+git_commit=154be95e2d8c2ad6a671c7d0cb998ca81146a715
+git_status=?? artifacts/
+?? runtime/
+arm=b0
+task_profile=hammer_cloned_v1
+env_name=hammer-cloned-v1
+seed=2
+offline_steps=1000000
+online_steps=1000000
+alpha=11000
+discount=0.99
+time_steps=100
+num_candidates=5
+log_interval=5000
+early_stopping=false

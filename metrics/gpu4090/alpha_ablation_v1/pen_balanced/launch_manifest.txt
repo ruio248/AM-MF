@@ -1,0 +1,18 @@
+git_commit=007b4cabcd6336cc6d27192de7010b5dbb74df74
+git_status=?? alpha_ablation_launch.sh
+?? artifacts/
+?? runtime/
+arm=b0
+task_profile=pen_cloned_v1
+env_name=pen-cloned-v1
+seed=1
+offline_steps=1000000
+online_steps=1000000
+alpha=10000
+discount=0.99
+time_steps=100
+num_candidates=5
+log_interval=5000
+early_stopping=false
+balanced_sampling=1
+normalize_q_loss=False
