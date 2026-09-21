@@ -81,40 +81,60 @@ def evaluate(
         step = 0
         render = []
         while not done:
-            # enable the observation have its own dimension. 
-            obs_batch = np.expand_dims(observation, axis=0) if observation.ndim == 1 else observation
-            
+            obs_batch = (
+                np.expand_dims(observation, axis=0)
+                if observation.ndim == 1
+                else observation
+            )
+
             if normalize_obs:
                 obs_batch = (obs_batch - obs_mean) / obs_std
-                
-            action = actor_fn(observations=obs_batch, temperature=eval_temperature)
-            
-            action = np.array(action[0] if action.ndim > 1 and action.shape[0] == 1 else action)
-            action = np.clip(action, -1, 1)
-            next_observation, reward, terminated, truncated, info = env.step(action)
-            if i>=num_eval_episodes-1:
-                # print(f"current observation is {observation}")
-                print(f"Step {i}: The agent generated action is {action}")
-                # print(f"next observation is {next_observation}")
-                # print(f"reward is {reward}")
-            
-            done = terminated or truncated
-            step += 1
 
-            if should_render and (step % video_frame_skip == 0 or done):
-                frame = env.render().copy()
-                render.append(frame)
-
-            transition = dict(
-                observation=observation,
-                next_observation=next_observation,
-                action=action,
-                reward=reward,
-                done=done,
-                info=info,
+            chunk_size = int(config.get('chunk_size', 1)) if config is not None else 1
+            action_dim = int(np.prod(env.action_space.shape))
+            action = np.asarray(
+                actor_fn(observations=obs_batch, temperature=eval_temperature)
             )
-            add_to(traj, transition)
-            observation = next_observation
+            if action.ndim > 1 and action.shape[0] == 1:
+                action = action[0]
+            action = action.reshape(-1)
+            expected_action_dim = chunk_size * action_dim
+            if action.size != expected_action_dim:
+                raise ValueError(
+                    f'Policy returned {action.size} values, expected '
+                    f'{expected_action_dim} for chunk_size={chunk_size}'
+                )
+            action_chunk = np.clip(
+                action.reshape(chunk_size, action_dim), -1, 1
+            )
+
+            if i >= num_eval_episodes - 1:
+                print(f"Step {i}: The agent generated action chunk is {action_chunk}")
+
+            for chunk_action in action_chunk:
+                next_observation, reward, terminated, truncated, info = env.step(
+                    np.asarray(chunk_action).copy()
+                )
+                done = bool(terminated or truncated)
+                step += 1
+
+                if should_render and (step % video_frame_skip == 0 or done):
+                    frame = env.render().copy()
+                    render.append(frame)
+
+                transition = dict(
+                    observation=observation,
+                    next_observation=next_observation,
+                    action=np.asarray(chunk_action),
+                    reward=reward,
+                    done=done,
+                    info=info,
+                )
+                add_to(traj, transition)
+                observation = next_observation
+                if done:
+                    break
+
         if i < num_eval_episodes:
             add_to(stats, flatten(info))
             trajs.append(traj)

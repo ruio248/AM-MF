@@ -144,6 +144,79 @@ class Dataset(FrozenDict):
                 self.augment(batch, ['observations', 'next_observations'])
         return batch
 
+    def to_chunked(self, chunk_size: int, discount: float):
+        """Convert one-step transitions into fixed-length action chunks.
+
+        A chunk is formed from ``chunk_size`` consecutive actions that do not
+        cross an episode boundary before the final action. The action vector
+        is flattened, rewards are discounted within the chunk, and the next
+        observation is taken after the final action. For ``chunk_size=1``
+        this preserves the original transition semantics exactly while adding
+        metadata used by the online collector.
+        """
+        chunk_size = int(chunk_size)
+        if chunk_size < 1:
+            raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+        if self.frame_stack is not None:
+            raise ValueError("Chunked sampling is incompatible with frame stacking")
+
+        required = (
+            "observations",
+            "actions",
+            "rewards",
+            "masks",
+            "terminals",
+            "next_observations",
+        )
+        missing = [key for key in required if key not in self]
+        if missing:
+            raise KeyError(f"Cannot build chunks; missing fields: {missing}")
+
+        data = {key: np.asarray(value) for key, value in self.items()}
+        size = len(data["observations"])
+        if size < chunk_size:
+            raise ValueError(
+                f"Dataset has {size} transitions, smaller than chunk_size={chunk_size}"
+            )
+
+        starts = np.arange(size - chunk_size + 1, dtype=np.int64)
+        if chunk_size > 1:
+            terminals = data["terminals"] > 0
+            prefix = np.concatenate(
+                [np.zeros(1, dtype=np.int64), np.cumsum(terminals, dtype=np.int64)]
+            )
+            # A terminal at the final action is allowed; a terminal in the
+            # preceding H-1 actions would make the chunk cross an episode.
+            valid = (prefix[starts + chunk_size - 1] - prefix[starts]) == 0
+            starts = starts[valid]
+        if len(starts) == 0:
+            raise ValueError(f"No valid chunks found for chunk_size={chunk_size}")
+
+        offsets = np.arange(chunk_size, dtype=np.int64)[None, :]
+        indices = starts[:, None] + offsets
+        end_indices = starts + chunk_size - 1
+        reward_weights = np.power(
+            np.float32(discount), np.arange(chunk_size, dtype=np.float32)
+        )
+
+        chunk_data = {
+            "observations": data["observations"][starts],
+            "actions": data["actions"][indices].reshape(len(starts), -1),
+            "rewards": np.sum(
+                data["rewards"][indices] * reward_weights[None, :], axis=1
+            ).astype(np.float32),
+            "masks": np.prod(data["masks"][indices], axis=1).astype(np.float32),
+            "terminals": data["terminals"][end_indices].astype(np.float32),
+            "next_observations": data["next_observations"][end_indices],
+            "executed_steps": np.full(
+                (len(starts), 1), chunk_size, dtype=np.float32
+            ),
+            "valid_action_mask": np.ones(
+                (len(starts), chunk_size), dtype=np.float32
+            ),
+        }
+        return Dataset.create(**chunk_data)
+
     def get_subset(self, idxs):
         """Return a subset of the dataset given the indices."""
         result = jax.tree_util.tree_map(lambda arr: arr[idxs], self._dict)

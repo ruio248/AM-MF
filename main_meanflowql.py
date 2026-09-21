@@ -46,6 +46,7 @@ flags.DEFINE_integer('buffer_size', 2000000, 'Replay buffer size.')
 flags.DEFINE_integer('log_interval', 5000, 'Logging interval.')
 flags.DEFINE_integer('eval_interval', 100000, 'Evaluation interval.')
 flags.DEFINE_integer('save_interval', 1000000, 'Saving interval.')
+flags.DEFINE_integer('chunk_size', 1, 'Number of environment actions in one Q-learning transition.')
 
 # Evaluation configuration flags
 flags.DEFINE_integer('eval_episodes', 50, 'Number of evaluation episodes.')
@@ -108,6 +109,16 @@ def main(_):
 
     # Configure datasets and replay buffer
     train_dataset = Dataset.create(**train_dataset)
+    if FLAGS.chunk_size < 1:
+        raise ValueError(f'chunk_size must be positive, got {FLAGS.chunk_size}')
+    config['chunk_size'] = FLAGS.chunk_size
+    train_dataset = train_dataset.to_chunked(
+        FLAGS.chunk_size, discount=config['discount']
+    )
+    if val_dataset is not None:
+        val_dataset = Dataset.create(**val_dataset).to_chunked(
+            FLAGS.chunk_size, discount=config['discount']
+        )
     if FLAGS.balanced_sampling:
         # Create separate replay buffer for balanced sampling between training dataset and replay buffer
         example_transition = {k: v[0] for k, v in train_dataset.items()}
@@ -170,6 +181,7 @@ def main(_):
     done = True
     expl_metrics = dict()
     online_rng = jax.random.PRNGKey(FLAGS.seed)
+    online_env_steps = 0
     
     # Initialize online training variables
 
@@ -242,66 +254,103 @@ def main(_):
                     batch, current_step=i
                 )
         else:
-            # Online fine-tuning phase
+            # Online fine-tuning phase: one learner update per environment chunk.
             online_rng, key = jax.random.split(online_rng)
 
             if done:
                 step = 0
                 ob, _ = env.reset()
-            
-            # Ensure observation has correct shape before calling sample_actions
-            if len(ob.shape) == 1:
-                ob_batch = ob[None, :]  # Add batch dimension
+
+            start_ob = np.asarray(ob)
+            if len(start_ob.shape) == 1:
+                ob_batch = start_ob[None, :]
             else:
-                ob_batch = ob
-            
-            # Apply observation normalization if enabled
-            if FLAGS.use_observation_normalization and train_dataset is not None and hasattr(train_dataset, 'normalize_obs') and train_dataset.normalize_obs:
-                print("normalizing online")
-                ob_batch = (ob_batch - train_dataset.obs_mean) / train_dataset.obs_std
-            
-            action = agent.sample_actions(observations=ob_batch, seed=key)
-            action = np.array(action)
-            
-            # Remove batch dimension if present for environment step
-            if action.ndim > 1 and action.shape[0] == 1:
-                action = action[0]  # Remove batch dimension: (1, 8) -> (8,)
-            
+                ob_batch = start_ob
 
-            next_ob, reward, terminated, truncated, info = env.step(action.copy())
-            done = terminated or truncated
-
-            # Apply D4RL antmaze reward adjustment
-            if 'antmaze' in FLAGS.env_name and (
-                'diverse' in FLAGS.env_name or 'play' in FLAGS.env_name or 'umaze' in FLAGS.env_name
+            if (
+                FLAGS.use_observation_normalization
+                and train_dataset is not None
+                and hasattr(train_dataset, 'normalize_obs')
+                and train_dataset.normalize_obs
             ):
-                # Adjust reward for D4RL antmaze.
-                reward = reward - 1.0
+                ob_batch = (ob_batch - train_dataset.obs_mean) / train_dataset.obs_std
 
-            # Store transition in replay buffer (use original unnormalized observations)
-            replay_buffer.add_transition(
-                dict(
-                    observations=ob,
-                    actions=action,
-                    rewards=reward,
-                    terminals=float(done),
-                    masks=1.0 - terminated,
-                    next_observations=next_ob,
+            action_dim = int(np.prod(env.action_space.shape))
+            expected_action_dim = FLAGS.chunk_size * action_dim
+            action = np.asarray(agent.sample_actions(observations=ob_batch, seed=key))
+            if action.ndim > 1 and action.shape[0] == 1:
+                action = action[0]
+            action = action.reshape(-1)
+            if action.size != expected_action_dim:
+                raise ValueError(
+                    f'Policy returned {action.size} values, expected '
+                    f'{expected_action_dim} for chunk_size={FLAGS.chunk_size}'
+                )
+
+            action_chunk = action.reshape(FLAGS.chunk_size, action_dim)
+            stored_action_chunk = np.zeros_like(action_chunk)
+            valid_action_mask = np.zeros((FLAGS.chunk_size,), dtype=np.float32)
+            chunk_rewards = []
+            current_ob = start_ob
+            terminated = False
+            truncated = False
+            info = {}
+
+            for chunk_index, chunk_action in enumerate(action_chunk):
+                next_ob, reward, terminated, truncated, info = env.step(
+                    np.asarray(chunk_action).copy()
+                )
+                done = bool(terminated or truncated)
+
+                if 'antmaze' in FLAGS.env_name and (
+                    'diverse' in FLAGS.env_name
+                    or 'play' in FLAGS.env_name
+                    or 'umaze' in FLAGS.env_name
+                ):
+                    reward = reward - 1.0
+
+                stored_action_chunk[chunk_index] = chunk_action
+                valid_action_mask[chunk_index] = 1.0
+                chunk_rewards.append(float(reward))
+                current_ob = np.asarray(next_ob)
+                online_env_steps += 1
+                step += 1
+                if done:
+                    break
+
+            executed_steps = int(valid_action_mask.sum())
+            discount = float(config['discount'])
+            chunk_reward = float(
+                np.dot(
+                    np.asarray(chunk_rewards, dtype=np.float32),
+                    np.power(discount, np.arange(executed_steps, dtype=np.float32)),
                 )
             )
-            ob = next_ob
+            replay_buffer.add_transition(
+                dict(
+                    observations=start_ob,
+                    actions=stored_action_chunk.reshape(-1),
+                    rewards=chunk_reward,
+                    terminals=float(done),
+                    masks=1.0 - float(terminated),
+                    next_observations=current_ob,
+                    executed_steps=np.asarray([executed_steps], dtype=np.float32),
+                    valid_action_mask=valid_action_mask,
+                )
+            )
+            ob = current_ob
 
             if done:
                 expl_metrics = {f'exploration/{k}': np.mean(v) for k, v in flatten(info).items()}
 
-            step += 1
-
-            # Update agent with appropriate sampling strategy
+            # Update agent with appropriate sampling strategy.
             if FLAGS.balanced_sampling:
-                # Sample half from training dataset and half from replay buffer
                 dataset_batch = train_dataset.sample(config['batch_size'] // 2)
                 replay_batch = replay_buffer.sample(config['batch_size'] // 2)
-                batch = {k: np.concatenate([dataset_batch[k], replay_batch[k]], axis=0) for k in dataset_batch}
+                batch = {
+                    k: np.concatenate([dataset_batch[k], replay_batch[k]], axis=0)
+                    for k in dataset_batch
+                }
             else:
                 batch = train_dataset.sample(config['batch_size'])
 
@@ -318,6 +367,8 @@ def main(_):
         # Log training metrics
         if i % FLAGS.log_interval == 0:
             train_metrics = {f'training/{k}': v for k, v in update_info.items()}
+            train_metrics['training/online_env_steps'] = online_env_steps
+            train_metrics['training/chunk_size'] = FLAGS.chunk_size
             if val_dataset is not None:
                 val_batch = val_dataset.sample(config['batch_size'])
                 # Compute validation loss with required rng parameter

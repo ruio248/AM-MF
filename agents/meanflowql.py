@@ -60,7 +60,9 @@ class MeanFlowQL_Agent(flax.struct.PyTreeNode):
         else:
             next_q = next_qs.mean(axis=0)
 
-        target_q = batch['rewards'] + self.config['discount'] * batch['masks'] * next_q
+        chunk_size = int(self.config.get('chunk_size', 1))
+        bootstrap_discount = self.config['discount'] ** chunk_size
+        target_q = batch['rewards'] + bootstrap_discount * batch['masks'] * next_q
 
         q = self.network.select('critic')(batch['observations'], actions=batch['actions'], params=grad_params)
         critic_loss = jnp.square(q - target_q).mean() 
@@ -70,8 +72,8 @@ class MeanFlowQL_Agent(flax.struct.PyTreeNode):
             'q_mean': q.mean(),
             'q_max': q.max(),
             'q_min': q.min(),
+            'bootstrap_discount': bootstrap_discount,
         }
-    
 
     def meanflow_loss(self, batch, grad_params, rng):
         batch_size, action_dim = batch['actions'].shape

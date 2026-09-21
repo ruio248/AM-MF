@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
-  echo "usage: $0 {b0|n} {humanoid_large_task1|relocate_cloned} SEED OUTPUT_ROOT" >&2
+  echo "usage: $0 {b0|n} {humanoid_large_task1|relocate_cloned|door_cloned|pen_cloned} SEED OUTPUT_ROOT" >&2
   exit 2
 fi
 
@@ -40,6 +40,22 @@ case "$task_profile" in
     metric="evaluation/episode.normalized_return"
     project_name="meanflowql_upstream_relocate"
     ;;
+  door_cloned)
+    env_name="door-cloned-v1"
+    alpha="9000"
+    discount="0.99"
+    time_steps="50"
+    metric="evaluation/episode.normalized_return"
+    project_name="gmfc_chunk_door_cloned"
+    ;;
+  pen_cloned)
+    env_name="pen-cloned-v1"
+    alpha="10000"
+    discount="0.99"
+    time_steps="100"
+    metric="evaluation/episode.normalized_return"
+    project_name="gmfc_chunk_pen_cloned"
+    ;;
   *)
     echo "unknown task profile: $task_profile" >&2
     exit 2
@@ -53,6 +69,7 @@ eval_episodes="${AM_MF_EVAL_EPISODES:-50}"
 save_interval="${AM_MF_SAVE_INTERVAL:-100000}"
 buffer_size="${AM_MF_BUFFER_SIZE:-2000000}"
 log_interval="${AM_MF_LOG_INTERVAL:-5000}"
+chunk_size="${AM_MF_CHUNK_SIZE:-1}"
 run_group="${arm}_${task_profile}_seed${seed}"
 # The formal N protocol uses the agent default (500k updates).  A short smoke
 # run can lower this *only* through an explicit environment override so that
@@ -77,6 +94,7 @@ mkdir -p "$output_root"
   printf 'discount=%s\n' "$discount"
   printf 'time_steps=%s\n' "$time_steps"
   printf 'num_candidates=5\n'
+  printf 'chunk_size=%s\n' "$chunk_size"
   printf 'log_interval=%s\n' "$log_interval"
   printf 'early_stopping=false\n'
   if [[ "$arm" == "n" ]]; then
@@ -84,7 +102,7 @@ mkdir -p "$output_root"
   fi
 } > "$output_root/launch_manifest.txt"
 
-bash "$project_root/scripts/experiment_env.sh" -m unittest discover -s tests -p 'test_upstream_integrity.py'
+bash "$project_root/scripts/experiment_env.sh" -m unittest discover -s tests -p 'test_chunking.py'
 
 exec bash "$project_root/scripts/experiment_env.sh" main_meanflowql.py \
   --env_name="$env_name" \
@@ -94,6 +112,7 @@ exec bash "$project_root/scripts/experiment_env.sh" main_meanflowql.py \
   --agent.discount="$discount" \
   --agent.num_candidates=5 \
   --agent.consistency_alpha=0 \
+  --chunk_size="$chunk_size" \
   "${agent_extra_flags[@]}" \
   --seed="$seed" \
   --offline_steps="$offline_steps" \
