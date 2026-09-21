@@ -13,6 +13,10 @@ task_profile="$2"
 seed="$3"
 output_root="$4"
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+workspace_root="$(cd "$project_root/../.." && pwd)"
+if [[ "$output_root" != /* ]]; then
+  output_root="$workspace_root/$output_root"
+fi
 
 case "$arm" in
   b0) agent="agents/meanflowql.py" ;;
