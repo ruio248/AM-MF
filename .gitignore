@@ -1,0 +1,10 @@
+# New experiment artifacts must live outside the source checkout.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+runtime/
+results/
+runs/
+*.bundle
+
