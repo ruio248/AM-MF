@@ -63,15 +63,24 @@ class ChunkAgentTest(unittest.TestCase):
         observations = batch["observations"][:1]
         seed = jax.random.PRNGKey(43)
         for count in (1, 2, 5):
-            action_seed, _ = jax.random.split(seed)
-            noises = jax.vmap(lambda key: agent.sample_noise(key, (1, 4)))(
-                jax.random.split(action_seed, count)
-            ).reshape(count, 4)
-            obs = jnp.repeat(observations, count, axis=0)
-            actions = jnp.clip(agent.network.select("actor_bc_flow")(
-                obs, noises, jnp.ones((count, 1))), -1, 1)
-            scores = agent.network.select("target_critic")(obs, actions=actions).mean(axis=0)
-            expected = actions[jnp.argmax(scores)][None]
+            @jax.jit
+            def reference(model, observations, seed):
+                # Compile the whole independent reference, matching production's
+                # GPU fusion/rounding, not a sequence of eager per-op kernels.
+                action_seed, _ = jax.random.split(seed)
+                noises = jax.vmap(lambda key: model.sample_noise(key, (1, 4)))(
+                    jax.random.split(action_seed, count)
+                ).reshape(count, 4)
+                obs = jnp.repeat(observations, count, axis=0)
+                actions = jnp.clip(model.network.select("actor_bc_flow")(
+                    obs, noises, jnp.ones((count, 1))), -1, 1)
+                scores = model.network.select("target_critic")(obs, actions=actions).mean(axis=0)
+                index = jnp.argmax(scores)
+                return actions[index][None], index, scores, actions
+
+            expected, index, scores, candidates = reference(agent, observations, seed)
+            self.assertEqual(candidates.shape, (count, 4))
+            self.assertEqual(int(index), int(jnp.argmax(scores)))
             actual = agent.sample_actions(observations, seed=seed, num_candidates=count)
             np.testing.assert_allclose(actual, expected, atol=1e-6)
 
