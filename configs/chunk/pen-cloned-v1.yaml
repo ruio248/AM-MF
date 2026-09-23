@@ -1,0 +1,41 @@
+# Base: global-mean-field-control @ 31e4b77; new effective-observation normalization.
+# Task alpha/candidates/time grid: MeanFlowQL Appendix Table 7.
+# critic_lr=3e-4 deliberately preserves the implementation, not paper Table 6's 1e-4.
+protocol_version: 1
+env_name: pen-cloned-v1
+chunk_sizes: [1, 2, 5, 10]
+seeds: [1, 2]
+methods: [b0, n]
+training:
+  offline_steps: 1000000
+  online_steps: 1000000
+  buffer_size: 2000000
+  eval_interval: 100000
+  eval_episodes: 50
+  log_interval: 5000
+  save_interval: 100000
+agent:
+  alpha: 10000.0
+  time_steps: 100
+  discount: 0.99
+  batch_size: 256
+  lr: 0.0001
+  lr_min_ratio: 0.1
+  critic_lr: 0.0003
+  num_candidates: 5
+  target_num_candidates: 5
+  consistency_alpha: 0.0
+  normalize_q_loss: false
+  use_dynamic_alpha: true
+n_agent:
+  behavior_warmup_updates: 500000
+  control_eta: 0.1
+  teacher_steps: 8
+  teacher_solver: midpoint_rk2
+  teacher_batch_size: 32
+  transport_coef: 1.0
+  jacobian_coef: 0.01
+  jacobian_interval: 100
+  jacobian_batch_size: 4
+  jacobian_fd_eps: 0.001
+  target_actor_tau: 0.005
