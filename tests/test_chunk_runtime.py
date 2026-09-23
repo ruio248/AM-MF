@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import unittest
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 
 from utils.chunk_data import ObservationNormalizer
@@ -88,6 +89,9 @@ class ChunkRuntimeTest(unittest.TestCase):
         agent, batch = tiny_agent("n")
         for step in range(4):
             agent, _ = agent.update(batch, step)
+        # Exercise serialization of nontrivial dynamic-alpha/history state too.
+        agent = agent.replace(current_alpha=jnp.asarray(2.5), valid_count=jnp.asarray(7),
+                              loss_history=jnp.arange(len(agent.loss_history), dtype=jnp.float32))
         norm = ObservationNormalizer.fit(np.asarray(batch["observations"]))
         contract = checkpoint_contract("door-cloned-v1", "n", 1, agent.config, norm, {"sha256": "test"})
         rng = np.random.default_rng(11)

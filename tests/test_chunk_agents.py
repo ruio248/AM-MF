@@ -46,6 +46,14 @@ class ChunkAgentTest(unittest.TestCase):
                 self.assertEqual(action.shape, (4, horizon * 2))
                 _, info = agent.critic_loss(batch, agent.network.params, jax.random.PRNGKey(7))
                 self.assertAlmostEqual(float(info["bootstrap_discount"]), 0.99 ** horizon, places=6)
+                _, draw = jax.random.split(jax.random.PRNGKey(7))
+                next_action = agent.sample_actions(batch["next_observations"], seed=draw, num_candidates=2)
+                next_q = agent.network.select("target_critic")(
+                    batch["next_observations"], actions=next_action).mean(axis=0)
+                target = batch["rewards"] + (0.99 ** horizon) * batch["masks"] * next_q
+                q = agent.network.select("critic")(batch["observations"], actions=batch["actions"])
+                np.testing.assert_allclose(info["critic_loss"], jnp.mean((q - target) ** 2), rtol=1e-6)
+                self.assertEqual(float(target[-1]), float(batch["rewards"][-1]))
 
     def test_static_candidates_match_explicit_reference(self):
         agent, batch = tiny_agent("b0")

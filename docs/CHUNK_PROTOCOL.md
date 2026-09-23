@@ -187,4 +187,17 @@ ring overwrite vs brute-force indexing, normalization invariance, B0/N critic
 parity, static candidate counts, N snapshots/gradients, primitive-step budgets,
 evaluation RNG isolation, state-complete offline restore/next-update equivalence,
 matrix size, paired comparisons and AUC. The real-environment validation report
-is recorded separately in `docs/CHUNK_VALIDATION.md` after execution.
+is recorded separately in [CHUNK_VALIDATION.md](CHUNK_VALIDATION.md): all 16 smoke
+combinations passed, with a separate exact-state offline continuation check.
+
+The production-dimension numerical check is opt-in and needs an available GPU:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 AM_MF_FULL_MODEL_TEST=1 \
+  bash scripts/chunk_env.sh -m unittest discover \
+  -s tests -p 'test_chunk_production_shape.py' -v
+```
+
+It uses synthetic data with the real door dimensions and H=10, batch 256, the
+production network/teacher sizes, and only shortens warmup to enter the N path.
+It is not a learning-performance or long-run stability test.

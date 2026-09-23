@@ -169,7 +169,7 @@ def main():
     payload = dict(runs=runs, aggregate=summaries, paired=paired, warnings=warnings,
                    auc_units="normalized-return * environment-steps", auc_mean="AUC / online budget")
     (output / "summary.json").write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
-    fields = [key for key in runs[0] if key != "curve"]
+    fields = [key for key in runs[0] if key not in ("curve", "settings_signature")]
     with (output / "per_seed.csv").open("w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()

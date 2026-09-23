@@ -1,4 +1,12 @@
 # One-Step Generative Policies with Q-Learning: A Reformulation of MeanFlow
+
+**AM-MF chunk experiments:** This branch adds a separate B0/N action-chunk
+pipeline while preserving the historical training files. See
+[the chunk protocol and run commands](docs/CHUNK_PROTOCOL.md),
+[validation results](docs/CHUNK_VALIDATION.md), and the
+[door](configs/chunk/door-cloned-v1.yaml) / [pen](configs/chunk/pen-cloned-v1.yaml)
+configs. Formal experiment jobs are never started automatically.
+
 [![AAAI](https://img.shields.io/badge/AAAI-Accepted-87CEEB.svg)](https://aaai.org/)
 [![arXiv](https://img.shields.io/badge/Paper-arXiv-FFB6C1.svg)](https://arxiv.org/abs/2511.13035)
 
