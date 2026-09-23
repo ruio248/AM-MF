@@ -55,7 +55,11 @@ def main():
         for job in lane_jobs:
             output = Path(job["output"])
             if (output / "COMPLETED.json").is_file():
-                rows.append(dict(**job, gpu=gpu, status="skipped_complete"))
+                existing = json.loads((output / "manifest.json").read_text())
+                expected = dict(env_name=job["task"], method=job["method"],
+                                chunk_size=job["horizon"], seed=job["seed"], smoke=args.smoke)
+                matched = all(existing.get(key) == value for key, value in expected.items())
+                rows.append(dict(**job, gpu=gpu, status="skipped_complete" if matched else "blocked_protocol_mismatch"))
                 continue
             if output.exists() and any(output.iterdir()):
                 rows.append(dict(**job, gpu=gpu, status="blocked_nonempty"))
