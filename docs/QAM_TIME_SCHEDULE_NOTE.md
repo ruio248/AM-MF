@@ -67,7 +67,7 @@ For `qam_shape_bounded`, define `Z` as the arithmetic mean of the capped numerat
 Implementation touchpoints, if this ablation is approved for code:
 
 1. Put a pure, JAX-compatible time-weight helper in `utils/note_flow.py`; add the new settings and validation in `agents/am_meanflow_note.py`. Apply the weight only in `teacher_field`, so both ordinary teacher trajectories and the Jacobian teacher use the same field.
-2. Add schedule keys to the N YAMLs under `configs/chunk/`, pass them through the existing `make_config` path in `agents/chunked.py`, and include them in effective configuration/checkpoint validation. B0 configuration remains unchanged. Any CLI override in `main_chunked.py` must also be recorded in the manifest.
+2. Add schedule keys to the N YAMLs under `configs/chunk/`, pass them through the existing `make_config` path in `agents/chunked.py`, and include them in effective configuration/checkpoint validation. Interpret a legacy checkpoint with no schedule key as `constant`; reject restore when its resolved schedule differs from the requested one. B0 configuration remains unchanged. Any CLI override in `main_chunked.py` must also be recorded in the manifest.
 3. Log `eta_eff(t)`, `||lambda_t||`, and `||eta_eff(t) lambda_t||` by generation-time bin, as well as the fraction at the cap. Update the current fixed-`t=0.5` control metric to use `eta_eff(0.5)`.
 4. Test constant-mode parity with the current implementation, finite weights at every RK2 stage, the intended time direction, zero-control parity, and rejection of a checkpoint whose saved schedule differs. Then compare matched N runs at fixed task, H, seed, critic, and environment-step budget; report offline endpoint and online curves/AUC alongside the realized control norms.
 
